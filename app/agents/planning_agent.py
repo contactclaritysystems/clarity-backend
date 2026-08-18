@@ -189,20 +189,24 @@ def merge_from_history(history: str) -> dict:
     slots = {}
     if not history:
         return slots
-    # Formats possibles laissés par nos messages précédents
     m = re.search(r"date[=:]\s*(\d{4}-\d{2}-\d{2})", history, re.I)
     if m:
+        slots["appointment_date"] = m.group(1)
+    m = re.search(r"(20\d{2}-\d{2}-\d{2})", history)
+    if m and "appointment_date" not in slots:
         slots["appointment_date"] = m.group(1)
     m = re.search(r"heure[=:]\s*(\d{2}:\d{2})", history, re.I)
     if m:
         slots["appointment_time"] = m.group(1)
+    m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", history)
+    if m and "appointment_time" not in slots:
+        slots["appointment_time"] = f"{int(m.group(1)):02d}:{m.group(2)}"
     m = re.search(r"contact[=:]\s*([^\n|;]+)", history, re.I)
     if m:
         slots["contact_name"] = m.group(1).strip()
     m = re.search(r"motif[=:]\s*([^\n|;]+)", history, re.I)
     if m:
         slots["title"] = m.group(1).strip()
-    # Aussi depuis un message "Il me manque l'heure" context
     m = re.search(r"RDV partial:\s*(\{.*?\})", history)
     if m:
         try:
@@ -305,13 +309,18 @@ async def run_planning_agent(payload: dict) -> dict:
         }
 
     try:
-        # Extraction de la dictée courante
-        if instruction:
-            fixed_date = parse_french_date(instruction)
-            fixed_time = parse_french_time(instruction)
-            if fixed_date:
+        # Extraction : dictée courante + historique (pour ne pas perdre date/heure déjà dites)
+        combined = f"{history}\n{instruction}".strip()
+        if combined:
+            fixed_date = parse_french_date(instruction) or parse_french_date(history)
+            fixed_time = parse_french_time(instruction) or parse_french_time(history)
+            if fixed_date and not slots.get("appointment_date"):
                 slots["appointment_date"] = fixed_date
-            if fixed_time:
+            elif fixed_date and instruction and parse_french_date(instruction):
+                slots["appointment_date"] = fixed_date  # la nouvelle dictée prime
+            if fixed_time and not slots.get("appointment_time"):
+                slots["appointment_time"] = fixed_time
+            elif fixed_time and instruction and parse_french_time(instruction):
                 slots["appointment_time"] = fixed_time
 
             llm = await extract_slots_llm(instruction)
@@ -358,17 +367,22 @@ async def run_planning_agent(payload: dict) -> dict:
         }, ensure_ascii=False)
 
         def retained_msg(question: str) -> str:
+            """Question claire + rappel humain des infos déjà connues (sans format technique)."""
             bits = []
             if slots.get("contact_name"):
-                bits.append(f"contact={slots['contact_name']}")
+                bits.append(slots["contact_name"])
             if slots.get("appointment_date"):
-                bits.append(f"date={slots['appointment_date']}")
-            if slots.get("appointment_time"):
-                bits.append(f"heure={slots['appointment_time']}")
+                when = format_fr_date(
+                    slots["appointment_date"],
+                    slots.get("appointment_time") or ""
+                )
+                bits.append(when)
+            elif slots.get("appointment_time"):
+                bits.append(f"à {slots['appointment_time']}")
             if slots.get("title") and slots.get("title") != "Rendez-vous":
-                bits.append(f"motif={slots['title']}")
+                bits.append(f"« {slots['title']} »")
             if bits:
-                return f"{question}\n(je retiens : {' | '.join(bits)})"
+                return f"{question}\n({', '.join(bits)})"
             return question
 
         if not slots.get("appointment_date"):
