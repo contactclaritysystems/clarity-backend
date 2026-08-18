@@ -1,6 +1,6 @@
 """
-Agent Planning Clarity — Premium
-Crée / comprend des rendez-vous à partir d'une dictée.
+Agent Planning Clarity — Premium (slot-filling)
+Ne redemande que l'info manquante. Conserve le reste.
 """
 
 import json
@@ -49,132 +49,80 @@ def update_progress(request_id: Optional[str], status: str, message: str = ""):
         print(f"[Planning Progress] {e}")
 
 
-INTENT_SYSTEM = """Tu es le module Planning de Clarity Systems (SaaS français premium).
+# ---------------------------------------------------------------------------
+# Dates FR déterministes
+# ---------------------------------------------------------------------------
 
-Extrais les infos d'une dictée pour créer un rendez-vous.
-Date de référence (aujourd'hui) : __TODAY__
-Réponds UNIQUEMENT en JSON.
-
-Règles dates (français) :
-- "demain" → date de demain
-- "après-demain" → +2 jours
-- "lundi/mardi/..." → prochain jour de la semaine
-- "dans 3 jours" → +3 jours
-- "le 25" → prochain 25 du mois (ou ce mois si pas passé)
-- Heure par défaut si absente : 10:00
-- Format date : YYYY-MM-DD
-- Format heure : HH:MM (24h)
-
-{
-  "contact_name": "prénom ou nom ou null",
-  "title": "motif court du RDV",
-  "description": "détails éventuels",
-  "appointment_date": "YYYY-MM-DD",
-  "appointment_time": "HH:MM",
-  "has_enough_info": true,
-  "missing": null,
-  "raw_summary": "résumé clair"
-}
-
-has_enough_info = false si date manquante complètement.
-Si seule l'heure manque, mets 10:00 et has_enough_info = true.
-"""
+def next_weekday(base: datetime, target_weekday: int, prochain: bool = False) -> datetime:
+    current = base.weekday()
+    days_ahead = target_weekday - current
+    if days_ahead < 0:
+        days_ahead += 7
+    elif days_ahead == 0:
+        days_ahead = 7 if prochain else 0
+    elif prochain and days_ahead > 0:
+        days_ahead += 7
+    return base + timedelta(days=days_ahead)
 
 
-async def extract_planning_intent(instruction: str, user_name: str) -> dict:
-    today = datetime.now().strftime("%Y-%m-%d")
-    weekdays = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
-    weekday = weekdays[datetime.now().weekday()]
-    system = INTENT_SYSTEM.replace("__TODAY__", f"{today} ({weekday})")
+def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Optional[str]:
+    if base is None:
+        base = datetime.now()
+    base = base.replace(hour=0, minute=0, second=0, microsecond=0)
+    text = (instruction or "").lower()
 
-    response = get_client().chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"Dictée : {instruction}\nUtilisateur : {user_name}"}
-        ],
-        temperature=0.1,
-        max_tokens=400,
-        response_format={"type": "json_object"}
-    )
-    raw = response.choices[0].message.content or "{}"
-    raw = raw.strip()
-    # Nettoyage si le modèle renvoie du texte autour du JSON
-    if raw.startswith("```"):
-        raw = raw.strip("`")
-        if raw.startswith("json"):
-            raw = raw[4:].strip()
+    if "après-demain" in text or "apres-demain" in text:
+        return (base + timedelta(days=2)).strftime("%Y-%m-%d")
+    if re.search(r"\bdemain\b", text):
+        return (base + timedelta(days=1)).strftime("%Y-%m-%d")
+    if "aujourd" in text:
+        return base.strftime("%Y-%m-%d")
+
+    days_map = {
+        "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
+        "vendredi": 4, "samedi": 5, "dimanche": 6,
+    }
+    prochain = "prochain" in text or "prochaine" in text
+    for name, wd in days_map.items():
+        if name in text:
+            return next_weekday(base, wd, prochain=prochain).strftime("%Y-%m-%d")
+
+    m = re.search(r"dans\s+(\d+)\s+jours?", text)
+    if m:
+        return (base + timedelta(days=int(m.group(1)))).strftime("%Y-%m-%d")
+
+    # Date ISO déjà fournie
+    m = re.search(r"(20\d{2})-(\d{2})-(\d{2})", text)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+
+    return None
+
+
+def parse_french_time(instruction: str) -> Optional[str]:
+    text = (instruction or "").lower().replace("h", ":")
+    # 14:00 / 14:30
+    m = re.search(r"\b([01]?\d|2[0-3])[:\.]([0-5]\d)\b", text)
+    if m:
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+    # 14h / 9h
+    m = re.search(r"\b([01]?\d|2[0-3])\s*h\b", (instruction or "").lower())
+    if m:
+        return f"{int(m.group(1)):02d}:00"
+    # "14 heures"
+    m = re.search(r"\b([01]?\d|2[0-3])\s*heures?\b", (instruction or "").lower())
+    if m:
+        return f"{int(m.group(1)):02d}:00"
+    return None
+
+
+def weekday_name_fr(date_str: str) -> str:
+    names = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        # Fallback minimal
-        return {
-            "contact_name": None,
-            "title": "Rendez-vous",
-            "description": instruction,
-            "appointment_date": None,
-            "appointment_time": "10:00",
-            "has_enough_info": False,
-            "missing": "la date du rendez-vous",
-            "raw_summary": instruction,
-        }
-    # Normalise les clés
-    if data.get("contact_name") in ("null", "None", ""):
-        data["contact_name"] = None
-    return data
-
-
-def search_contacts(name: str, user_id: Optional[str] = None) -> List[dict]:
-    sb = get_supabase()
-    if not sb or not name:
-        return []
-    try:
-        query = sb.table("contacts").select("id, full_name, email, company")
-        if user_id:
-            query = query.eq("user_id", user_id)
-        query = query.ilike("full_name", f"%{name.strip()}%")
-        result = query.limit(5).execute()
-        return result.data or []
-    except Exception as e:
-        print(f"[Planning] contact search error: {e}")
-        return []
-
-
-def create_appointment(user_id: str, data: dict) -> Optional[dict]:
-    sb = get_supabase()
-    if not sb:
-        return None
-    try:
-        row = {
-            "user_id": user_id,
-            "contact_name": data.get("contact_name") or None,
-            "title": data.get("title") or "Rendez-vous",
-            "description": data.get("description") or "",
-            "appointment_date": data.get("appointment_date"),
-            "appointment_time": (data.get("appointment_time") or "10:00")[:5],
-            "status": "scheduled",
-        }
-        # N'ajoute contact_id que s'il est présent (colonne parfois absente)
-        cid = data.get("contact_id")
-        if cid:
-            row["contact_id"] = cid
-
-        result = sb.table("appointments").insert(row).execute()
-        if result.data:
-            return result.data[0]
-        return row
-    except Exception as e:
-        print(f"[Planning] insert error: {e}")
-        # Retry sans contact_id si la colonne n'existe pas
-        try:
-            row.pop("contact_id", None)
-            result = sb.table("appointments").insert(row).execute()
-            if result.data:
-                return result.data[0]
-            return row
-        except Exception as e2:
-            print(f"[Planning] insert retry error: {e2}")
-            return None
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        return names[d.weekday()]
+    except Exception:
+        return ""
 
 
 def format_fr_date(date_str: str, time_str: str) -> str:
@@ -191,99 +139,339 @@ def format_fr_date(date_str: str, time_str: str) -> str:
         return f"{date_str} {time_str or ''}".strip()
 
 
+# ---------------------------------------------------------------------------
+# Extraction LLM (complète les slots textuels)
+# ---------------------------------------------------------------------------
+
+INTENT_SYSTEM = """Tu extrais les infos d'un rendez-vous depuis une dictée française.
+Réponds UNIQUEMENT en JSON valide.
+
+Champs :
+- contact_name: prénom/nom du client ou null
+- title: motif court ou null
+- description: détails ou ""
+- mentioned_weekday: lundi/mardi/.../null (si l'utilisateur a dit un jour)
+- mentioned_day_number: numéro du jour dans le mois ou null (ex: 25)
+
+Ne calcule PAS la date finale. Juste ce qui est dit.
+"""
+
+
+async def extract_slots_llm(instruction: str) -> dict:
+    try:
+        response = get_client().chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": INTENT_SYSTEM},
+                {"role": "user", "content": instruction}
+            ],
+            temperature=0.1,
+            max_tokens=300,
+            response_format={"type": "json_object"}
+        )
+        raw = (response.choices[0].message.content or "{}").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        data = json.loads(raw)
+        for k in ("contact_name", "title", "mentioned_weekday"):
+            if data.get(k) in ("null", "None", ""):
+                data[k] = None
+        return data
+    except Exception as e:
+        print(f"[Planning LLM] {e}")
+        return {}
+
+
+def merge_from_history(history: str) -> dict:
+    """Récupère les slots déjà connus dans l'historique de conversation."""
+    slots = {}
+    if not history:
+        return slots
+    # Formats possibles laissés par nos messages précédents
+    m = re.search(r"date[=:]\s*(\d{4}-\d{2}-\d{2})", history, re.I)
+    if m:
+        slots["appointment_date"] = m.group(1)
+    m = re.search(r"heure[=:]\s*(\d{2}:\d{2})", history, re.I)
+    if m:
+        slots["appointment_time"] = m.group(1)
+    m = re.search(r"contact[=:]\s*([^\n|;]+)", history, re.I)
+    if m:
+        slots["contact_name"] = m.group(1).strip()
+    m = re.search(r"motif[=:]\s*([^\n|;]+)", history, re.I)
+    if m:
+        slots["title"] = m.group(1).strip()
+    # Aussi depuis un message "Il me manque l'heure" context
+    m = re.search(r"RDV partial:\s*(\{.*?\})", history)
+    if m:
+        try:
+            slots.update(json.loads(m.group(1)))
+        except Exception:
+            pass
+    return slots
+
+
+def search_contacts(name: str, user_id: Optional[str] = None) -> List[dict]:
+    sb = get_supabase()
+    if not sb or not name:
+        return []
+    try:
+        query = sb.table("contacts").select("id, full_name, email, company")
+        if user_id:
+            query = query.eq("user_id", user_id)
+        query = query.ilike("full_name", f"%{name.strip()}%")
+        result = query.limit(5).execute()
+        return result.data or []
+    except Exception as e:
+        print(f"[Planning] contact search: {e}")
+        return []
+
+
+def create_appointment(user_id: str, data: dict) -> Optional[dict]:
+    sb = get_supabase()
+    if not sb:
+        return None
+    row = {
+        "user_id": user_id,
+        "contact_name": data.get("contact_name") or None,
+        "title": data.get("title") or "Rendez-vous",
+        "description": data.get("description") or "",
+        "appointment_date": data.get("appointment_date"),
+        "appointment_time": (data.get("appointment_time") or "10:00")[:5],
+        "status": "scheduled",
+    }
+    try:
+        if data.get("contact_id"):
+            row["contact_id"] = data["contact_id"]
+        result = sb.table("appointments").insert(row).execute()
+        return (result.data or [row])[0]
+    except Exception as e:
+        print(f"[Planning] insert: {e}")
+        try:
+            row.pop("contact_id", None)
+            result = sb.table("appointments").insert(row).execute()
+            return (result.data or [row])[0]
+        except Exception as e2:
+            print(f"[Planning] insert retry: {e2}")
+            return None
+
+
+def check_date_consistency(date_str: str, mentioned_weekday: Optional[str]) -> Optional[dict]:
+    """Si l'utilisateur a dit un jour qui ne correspond pas à la date → suggestions."""
+    if not date_str or not mentioned_weekday:
+        return None
+    actual = weekday_name_fr(date_str)
+    if not actual:
+        return None
+    if mentioned_weekday.lower().strip() != actual:
+        # Propose la date qui match le jour dit, et celle du numéro
+        return {
+            "actual_weekday": actual,
+            "said_weekday": mentioned_weekday.lower().strip(),
+        }
+    return None
+
+
 async def run_planning_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
     user_id = payload.get("user_id")
     user_name = (payload.get("user_name") or "").strip() or "Anthony"
+    history = payload.get("conversation_history") or ""
 
-    if not instruction:
+    # Slots déjà fournis explicitement (suivi)
+    slots: Dict[str, Any] = {
+        "contact_name": payload.get("contact_name"),
+        "title": payload.get("title"),
+        "description": payload.get("description") or "",
+        "appointment_date": payload.get("appointment_date"),
+        "appointment_time": payload.get("appointment_time"),
+        "contact_id": payload.get("contact_id"),
+    }
+    # Nettoyage vides
+    slots = {k: v for k, v in slots.items() if v not in (None, "", "null")}
+
+    # Historique
+    slots.update({k: v for k, v in merge_from_history(history).items() if k not in slots})
+
+    if not instruction and not slots.get("appointment_date"):
         return {
             "success": False,
-            "message": "Aucune instruction reçue.",
-            "request_id": request_id
-        }
-
-    if not user_id:
-        return {
-            "success": False,
-            "message": "Utilisateur non identifié.",
-            "request_id": request_id
+            "reason": "missing_date",
+            "message": "Pour quel jour est le rendez-vous ?",
+            "partial": slots,
+            "request_id": request_id,
         }
 
     try:
-        update_progress(request_id, "contact_found", "Analyse de la demande…")
-        intent = await extract_planning_intent(instruction, user_name)
+        # Extraction de la dictée courante
+        if instruction:
+            fixed_date = parse_french_date(instruction)
+            fixed_time = parse_french_time(instruction)
+            if fixed_date:
+                slots["appointment_date"] = fixed_date
+            if fixed_time:
+                slots["appointment_time"] = fixed_time
 
-        if not intent.get("has_enough_info") or not intent.get("appointment_date"):
-            missing = intent.get("missing") or "la date du rendez-vous"
+            llm = await extract_slots_llm(instruction)
+            if llm.get("contact_name") and not slots.get("contact_name"):
+                slots["contact_name"] = llm["contact_name"]
+            if llm.get("title") and not slots.get("title"):
+                slots["title"] = llm["title"]
+            if llm.get("description"):
+                slots["description"] = llm["description"]
+
+            # Cohérence jour / date
+            inconsistency = check_date_consistency(
+                slots.get("appointment_date"),
+                llm.get("mentioned_weekday")
+            )
+            if inconsistency and slots.get("appointment_date"):
+                said = inconsistency["said_weekday"]
+                actual = inconsistency["actual_weekday"]
+                # Calculer la date du jour dit (prochain)
+                days_map = {
+                    "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
+                    "vendredi": 4, "samedi": 5, "dimanche": 6,
+                }
+                alt = None
+                if said in days_map:
+                    alt = next_weekday(datetime.now(), days_map[said], prochain=True).strftime("%Y-%m-%d")
+                return {
+                    "success": False,
+                    "reason": "date_ambiguous",
+                    "message": f"Attention : le {slots['appointment_date']} tombe un {actual}, pas un {said}.",
+                    "suggestions": [
+                        {"label": f"{actual.capitalize()} {slots['appointment_date']}", "date": slots["appointment_date"]},
+                        *([{"label": f"{said.capitalize()} {alt}", "date": alt}] if alt else []),
+                    ],
+                    "partial": {**slots, "appointment_date": None},
+                    "request_id": request_id,
+                }
+
+        # --- Slot filling : ne demander que le trou ---
+        partial_tag = json.dumps({
+            k: slots.get(k) for k in (
+                "contact_name", "title", "appointment_date", "appointment_time", "description"
+            ) if slots.get(k)
+        }, ensure_ascii=False)
+
+        def retained_msg(question: str) -> str:
+            bits = []
+            if slots.get("contact_name"):
+                bits.append(f"contact={slots['contact_name']}")
+            if slots.get("appointment_date"):
+                bits.append(f"date={slots['appointment_date']}")
+            if slots.get("appointment_time"):
+                bits.append(f"heure={slots['appointment_time']}")
+            if slots.get("title") and slots.get("title") != "Rendez-vous":
+                bits.append(f"motif={slots['title']}")
+            if bits:
+                return f"{question}\n(je retiens : {' | '.join(bits)})"
+            return question
+
+        if not slots.get("appointment_date"):
             return {
                 "success": False,
-                "message": f"Il me manque {missing}. Peux-tu préciser ?",
-                "request_id": request_id
+                "reason": "missing_date",
+                "message": retained_msg("Pour quel jour ? (ex: demain, mardi prochain…)"),
+                "partial": slots,
+                "context_hint": f"RDV partial: {partial_tag}",
+                "request_id": request_id,
             }
 
-        contact_name = intent.get("contact_name")
-        contact_id = None
-        if contact_name:
-            contacts = search_contacts(contact_name, user_id)
-            if len(contacts) == 1:
-                contact_id = contacts[0].get("id")
-                contact_name = contacts[0].get("full_name") or contact_name
-            elif len(contacts) > 1:
-                # On prend le premier pour la V1, on pourra faire choose_contact plus tard
-                contact_id = contacts[0].get("id")
-                contact_name = contacts[0].get("full_name") or contact_name
+        if not slots.get("appointment_time"):
+            return {
+                "success": False,
+                "reason": "missing_time",
+                "message": retained_msg("À quelle heure ?"),
+                "partial": slots,
+                "context_hint": f"RDV partial: {partial_tag}",
+                "request_id": request_id,
+            }
 
-        appt_data = {
+        if not slots.get("contact_name"):
+            return {
+                "success": False,
+                "reason": "missing_contact",
+                "message": retained_msg("Avec qui est le rendez-vous ?"),
+                "partial": slots,
+                "context_hint": f"RDV partial: {partial_tag}",
+                "request_id": request_id,
+            }
+
+        # Motif : défaut soft, on ne bloque pas
+        if not slots.get("title"):
+            slots["title"] = "Rendez-vous"
+
+        # Résoudre contact
+        contact_id = slots.get("contact_id")
+        contact_name = slots.get("contact_name")
+        if contact_name and user_id and not contact_id:
+            found = search_contacts(contact_name, user_id)
+            if len(found) == 1:
+                contact_id = found[0].get("id")
+                contact_name = found[0].get("full_name") or contact_name
+            elif len(found) > 1:
+                return {
+                    "success": False,
+                    "reason": "choose_contact",
+                    "action": "choose_contact",
+                    "message": "Plusieurs contacts trouvés. Lequel ?",
+                    "contacts": found,
+                    "partial": slots,
+                    "request_id": request_id,
+                }
+
+        if not user_id:
+            return {
+                "success": False,
+                "message": "Utilisateur non identifié.",
+                "request_id": request_id,
+            }
+
+        created = create_appointment(user_id, {
+            **slots,
             "contact_name": contact_name,
             "contact_id": contact_id,
-            "title": intent.get("title") or "Rendez-vous",
-            "description": intent.get("description") or intent.get("raw_summary") or "",
-            "appointment_date": intent.get("appointment_date"),
-            "appointment_time": intent.get("appointment_time") or "10:00",
-        }
-
-        update_progress(request_id, "generating_mail", "Création du rendez-vous…")
-        created = create_appointment(user_id, appt_data)
+        })
 
         if not created:
             return {
                 "success": False,
-                "message": "Impossible d'enregistrer le rendez-vous. Réessaie dans un instant.",
-                "request_id": request_id
+                "message": "Impossible d'enregistrer le rendez-vous.",
+                "request_id": request_id,
             }
 
-        when = format_fr_date(appt_data["appointment_date"], appt_data["appointment_time"])
+        when = format_fr_date(slots["appointment_date"], slots["appointment_time"])
         who = f" avec {contact_name}" if contact_name else ""
-        title = "Rendez-vous créé"
-        message = f"✅ {appt_data['title']}{who} — {when}."
+        message = f"✅ RDV noté{who} — {when}"
 
         update_progress(request_id, "ready", when)
 
         return {
             "success": True,
-            "title": title,
+            "title": "Rendez-vous créé",
             "message": message,
             "content": message,
             "agent": "planning",
             "appointment": {
                 "id": created.get("id") if isinstance(created, dict) else None,
-                "date": appt_data["appointment_date"],
-                "time": appt_data["appointment_time"],
+                "date": slots["appointment_date"],
+                "time": slots["appointment_time"],
                 "contact_name": contact_name,
-                "title": appt_data["title"],
+                "title": slots.get("title"),
             },
-            "request_id": request_id
+            "request_id": request_id,
         }
 
     except Exception as e:
         print(f"[Planning Agent error] {e}")
         import traceback
         traceback.print_exc()
-        update_progress(request_id, "error", str(e))
         return {
             "success": False,
             "message": f"Erreur planning : {str(e)}",
-            "request_id": request_id
+            "request_id": request_id,
         }
