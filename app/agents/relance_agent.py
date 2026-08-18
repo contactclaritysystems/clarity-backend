@@ -173,11 +173,11 @@ def merge_from_history(history: str) -> dict:
     return slots
 
 
-def create_follow_up(user_id: str, data: dict) -> Optional[dict]:
+def create_follow_up(user_id: str, data: dict):
+    """Retourne (row|None, error_message|None)."""
     sb = get_supabase()
     if not sb:
-        print("[Relance] Supabase client manquant")
-        return None
+        return None, "Supabase non configuré"
 
     reason = (data.get("reason") or "Rappel").strip()
     if reason:
@@ -188,40 +188,47 @@ def create_follow_up(user_id: str, data: dict) -> Optional[dict]:
     if time_str and time_str not in (note or ""):
         note = f"⏰ {time_str}\n{note}".strip()
 
-    # Colonnes minimales alignées sur le frontend
-    row = {
+    base = {
         "user_id": user_id,
         "reason": reason,
         "reminder_date": data.get("reminder_date"),
         "status": "pending",
+        "message_context": note or reason,
     }
     if data.get("contact_name"):
-        row["contact_name"] = data["contact_name"]
-    if note:
-        row["message_context"] = note
+        base["contact_name"] = data["contact_name"]
 
-    attempts = [row]
-    # Variantes si le schéma diffère
+    attempts = []
     if time_str:
-        attempts.insert(0, {**row, "reminder_time": time_str})
-    attempts.append({**row, "status": "pending", "message_context": note or reason})
+        attempts.append({**base, "reminder_time": time_str})
+    attempts.append(dict(base))
+    # sans message_context
+    attempts.append({
+        "user_id": user_id,
+        "reason": reason,
+        "reminder_date": data.get("reminder_date"),
+        "status": "pending",
+    })
 
-    last_err = None
+    errors = []
     for attempt in attempts:
         try:
-            print(f"[Relance] insert attempt keys={list(attempt.keys())} data={attempt}")
+            print(f"[Relance] INSERT {attempt}")
             result = sb.table("follow_ups").insert(attempt).execute()
+            print(f"[Relance] RESULT data={result.data} count={getattr(result, 'count', None)}")
             if result.data:
-                return result.data[0]
-            # parfois data vide mais OK
-            return attempt
+                return result.data[0], None
+            # API parfois renvoie [] sans exception
+            errors.append("Réponse vide de Supabase")
         except Exception as e:
-            last_err = e
-            print(f"[Relance] insert fail: {e}")
+            err = str(e)
+            print(f"[Relance] INSERT ERROR: {err}")
+            errors.append(err)
             continue
 
-    print(f"[Relance] all inserts failed: {last_err}")
-    return None
+    return None, (errors[-1] if errors else "erreur inconnue")
+
+
 
 
 async def run_relance_agent(payload: dict) -> dict:
@@ -328,11 +335,11 @@ async def run_relance_agent(payload: dict) -> dict:
                 "request_id": request_id,
             }
 
-        created = create_follow_up(user_id, slots)
+        created, insert_error = create_follow_up(user_id, slots)
         if not created:
             return {
                 "success": False,
-                "message": "Impossible d'enregistrer le rappel.",
+                "message": f"Impossible d'enregistrer le rappel. {insert_error or ''}".strip(),
                 "request_id": request_id,
             }
 
