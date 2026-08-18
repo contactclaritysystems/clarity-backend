@@ -44,9 +44,20 @@ class AgentPayload(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
     user_name: Optional[str] = None
-    instruction: str
+    instruction: str = ""
     request_id: Optional[str] = None
     contact_id: Optional[str] = None
+    # Planning / Relances (slot-filling)
+    reason: Optional[str] = None
+    contact_name: Optional[str] = None
+    message_context: Optional[str] = None
+    reminder_date: Optional[str] = None
+    reminder_time: Optional[str] = None
+    appointment_date: Optional[str] = None
+    appointment_time: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    conversation_history: Optional[str] = None
 
 
 @app.get("/")
