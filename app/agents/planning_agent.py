@@ -52,7 +52,7 @@ def update_progress(request_id: Optional[str], status: str, message: str = ""):
 INTENT_SYSTEM = """Tu es le module Planning de Clarity Systems (SaaS français premium).
 
 Extrais les infos d'une dictée pour créer un rendez-vous.
-Date de référence (aujourd'hui) : {today}
+Date de référence (aujourd'hui) : __TODAY__
 Réponds UNIQUEMENT en JSON.
 
 Règles dates (français) :
@@ -83,10 +83,9 @@ Si seule l'heure manque, mets 10:00 et has_enough_info = true.
 
 async def extract_planning_intent(instruction: str, user_name: str) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
-    # Also give weekday for better French parsing
     weekdays = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
     weekday = weekdays[datetime.now().weekday()]
-    system = INTENT_SYSTEM.format(today=f"{today} ({weekday})")
+    system = INTENT_SYSTEM.replace("__TODAY__", f"{today} ({weekday})")
 
     response = get_client().chat.completions.create(
         model=MODEL,
@@ -98,7 +97,31 @@ async def extract_planning_intent(instruction: str, user_name: str) -> dict:
         max_tokens=400,
         response_format={"type": "json_object"}
     )
-    return json.loads(response.choices[0].message.content)
+    raw = response.choices[0].message.content or "{}"
+    raw = raw.strip()
+    # Nettoyage si le modèle renvoie du texte autour du JSON
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Fallback minimal
+        return {
+            "contact_name": None,
+            "title": "Rendez-vous",
+            "description": instruction,
+            "appointment_date": None,
+            "appointment_time": "10:00",
+            "has_enough_info": False,
+            "missing": "la date du rendez-vous",
+            "raw_summary": instruction,
+        }
+    # Normalise les clés
+    if data.get("contact_name") in ("null", "None", ""):
+        data["contact_name"] = None
+    return data
 
 
 def search_contacts(name: str, user_id: Optional[str] = None) -> List[dict]:
@@ -128,12 +151,13 @@ def create_appointment(user_id: str, data: dict) -> Optional[dict]:
             "title": data.get("title") or "Rendez-vous",
             "description": data.get("description") or "",
             "appointment_date": data.get("appointment_date"),
-            "appointment_time": data.get("appointment_time") or "10:00",
+            "appointment_time": (data.get("appointment_time") or "10:00")[:5],
             "status": "scheduled",
         }
-        # contact_id optionnel
-        if data.get("contact_id"):
-            row["contact_id"] = data["contact_id"]
+        # N'ajoute contact_id que s'il est présent (colonne parfois absente)
+        cid = data.get("contact_id")
+        if cid:
+            row["contact_id"] = cid
 
         result = sb.table("appointments").insert(row).execute()
         if result.data:
@@ -141,7 +165,16 @@ def create_appointment(user_id: str, data: dict) -> Optional[dict]:
         return row
     except Exception as e:
         print(f"[Planning] insert error: {e}")
-        return None
+        # Retry sans contact_id si la colonne n'existe pas
+        try:
+            row.pop("contact_id", None)
+            result = sb.table("appointments").insert(row).execute()
+            if result.data:
+                return result.data[0]
+            return row
+        except Exception as e2:
+            print(f"[Planning] insert retry error: {e2}")
+            return None
 
 
 def format_fr_date(date_str: str, time_str: str) -> str:
