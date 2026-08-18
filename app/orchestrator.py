@@ -33,7 +33,7 @@ AGENTS DISPONIBLES
 - "redaction" : rédiger un contenu long qui n'est PAS un email (post LinkedIn, note, compte-rendu, document, message Slack/Teams non-email…)
 - "assistant" : questions, conseils, explications, idées, résumés, reformulations, calculs, aide générale
 - "planning" : rendez-vous, réunions, agenda, disponibilité, planifier un créneau
-- "relance" : relancer quelqu'un, suivi d'une action en attente, reminder
+- "relance" : rappel personnel, "fais-moi penser", "rappelle-moi", "n'oublie pas", relancer un client, reminder
 
 ═══════════════════════════════════════
 RÈGLES DE ROUTAGE (dans l'ordre)
@@ -127,9 +127,6 @@ async def run_orchestrator(payload: dict) -> dict:
         # → on les route vers assistant avec une instruction claire
         # (prépare le terrain pour plus tard)
         final_agent = agent
-        # relance pas encore branché → assistant pour l'instant
-        if agent == "relance":
-            final_agent = "assistant"
 
         return {
             "agent": final_agent,

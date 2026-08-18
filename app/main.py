@@ -13,6 +13,7 @@ from typing import Optional
 from app.orchestrator import run_orchestrator
 from app.agents.mail_agent import run_mail_agent
 from app.agents.planning_agent import run_planning_agent
+from app.agents.relance_agent import run_relance_agent
 
 app = FastAPI(
     title="Clarity Backend",
@@ -110,6 +111,25 @@ async def webhook_mail(payload: AgentPayload):
 @app.post("/webhook/planning")
 async def webhook_planning(payload: AgentPayload):
     return await planning_agent_endpoint(payload)
+
+
+@app.post("/agent/relance")
+async def relance_agent_endpoint(payload: AgentPayload):
+    try:
+        return await run_relance_agent(payload.model_dump())
+    except Exception as e:
+        print(f"[RELANCE AGENT ERROR] {e}")
+        return {
+            "success": False,
+            "message": "Impossible de créer le rappel.",
+            "request_id": payload.request_id
+        }
+
+
+@app.post("/webhook/relance")
+async def webhook_relance(payload: AgentPayload):
+    return await relance_agent_endpoint(payload)
+
 
 
 if __name__ == "__main__":
