@@ -252,12 +252,6 @@ async def run_relance_agent(payload: dict) -> dict:
         elif t_hist and not slots.get("reminder_time"):
             slots["reminder_time"] = t_hist
 
-        # Si "fais-moi penser" sans date → demain par défaut (on demandera l'heure)
-        personal_reminder = bool(re.search(
-            r"fais[- ]moi penser|rappelle[- ]moi|n'oublie pas|ne pas oublier|pense à|pense a",
-            (instruction or "").lower()
-        ))
-
         if instruction:
             llm = await extract_llm(instruction)
             if llm.get("reason") and not slots.get("reason"):
@@ -266,10 +260,6 @@ async def run_relance_agent(payload: dict) -> dict:
                 slots["contact_name"] = llm["contact_name"]
             if llm.get("message_context") and not slots.get("message_context"):
                 slots["message_context"] = llm["message_context"]
-
-        # Si rappel perso sans date → demain
-        if personal_reminder and not slots.get("reminder_date"):
-            slots["reminder_date"] = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
         def retained_msg(question: str) -> str:
             bits = []
