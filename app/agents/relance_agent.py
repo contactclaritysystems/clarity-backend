@@ -283,21 +283,28 @@ async def run_relance_agent(payload: dict) -> dict:
                 "request_id": request_id,
             }
 
-        if not slots.get("reminder_date"):
+        if not slots.get("reminder_date") or not slots.get("reminder_time"):
+            from datetime import date as date_cls
+            today = datetime.now().strftime("%Y-%m-%d")
+            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
             return {
                 "success": False,
-                "reason": "missing_date",
-                "message": retained_msg("Pour quel jour ?"),
-                "partial": slots,
-                "request_id": request_id,
-            }
-
-        if not slots.get("reminder_time"):
-            return {
-                "success": False,
-                "reason": "missing_time",
-                "message": retained_msg("À quelle heure veux-tu que je te le rappelle ?"),
-                "partial": slots,
+                "reason": "needs_schedule",
+                "ui": "datetime_picker",
+                "message": slots.get("reason") or "Quand dois-je te le rappeler ?",
+                "partial": {
+                    "reason": slots.get("reason"),
+                    "contact_name": slots.get("contact_name"),
+                    "message_context": slots.get("message_context"),
+                    "reminder_date": slots.get("reminder_date"),
+                    "reminder_time": slots.get("reminder_time"),
+                },
+                "defaults": {
+                    "date": slots.get("reminder_date") or tomorrow,
+                    "time": slots.get("reminder_time") or "08:00",
+                    "today": today,
+                    "tomorrow": tomorrow,
+                },
                 "request_id": request_id,
             }
 
