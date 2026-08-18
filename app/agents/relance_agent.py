@@ -176,39 +176,52 @@ def merge_from_history(history: str) -> dict:
 def create_follow_up(user_id: str, data: dict) -> Optional[dict]:
     sb = get_supabase()
     if not sb:
+        print("[Relance] Supabase client manquant")
         return None
+
+    reason = (data.get("reason") or "Rappel").strip()
+    if reason:
+        reason = reason[0].upper() + reason[1:]
 
     note = data.get("message_context") or ""
     time_str = data.get("reminder_time")
-    if time_str:
-        # Conserve l'heure dans la note si pas de colonne dédiée
-        prefix = f"⏰ {time_str}\n"
-        if time_str not in (note or ""):
-            note = prefix + (note or "")
+    if time_str and time_str not in (note or ""):
+        note = f"⏰ {time_str}\n{note}".strip()
 
+    # Colonnes minimales alignées sur le frontend
     row = {
         "user_id": user_id,
-        "contact_name": data.get("contact_name") or None,
-        "reason": data.get("reason") or "Rappel",
-        "message_context": note,
+        "reason": reason,
         "reminder_date": data.get("reminder_date"),
         "status": "pending",
     }
-    try:
-        # tentative avec reminder_time si la colonne existe
-        row_with_time = dict(row)
-        if time_str:
-            row_with_time["reminder_time"] = time_str
-        result = sb.table("follow_ups").insert(row_with_time).execute()
-        return (result.data or [row_with_time])[0]
-    except Exception as e:
-        print(f"[Relance] insert with time failed: {e}")
+    if data.get("contact_name"):
+        row["contact_name"] = data["contact_name"]
+    if note:
+        row["message_context"] = note
+
+    attempts = [row]
+    # Variantes si le schéma diffère
+    if time_str:
+        attempts.insert(0, {**row, "reminder_time": time_str})
+    attempts.append({**row, "status": "pending", "message_context": note or reason})
+
+    last_err = None
+    for attempt in attempts:
         try:
-            result = sb.table("follow_ups").insert(row).execute()
-            return (result.data or [row])[0]
-        except Exception as e2:
-            print(f"[Relance] insert error: {e2}")
-            return None
+            print(f"[Relance] insert attempt keys={list(attempt.keys())} data={attempt}")
+            result = sb.table("follow_ups").insert(attempt).execute()
+            if result.data:
+                return result.data[0]
+            # parfois data vide mais OK
+            return attempt
+        except Exception as e:
+            last_err = e
+            print(f"[Relance] insert fail: {e}")
+            continue
+
+    print(f"[Relance] all inserts failed: {last_err}")
+    return None
 
 
 async def run_relance_agent(payload: dict) -> dict:
@@ -291,7 +304,7 @@ async def run_relance_agent(payload: dict) -> dict:
                 "success": False,
                 "reason": "needs_schedule",
                 "ui": "datetime_picker",
-                "message": slots.get("reason") or "Quand dois-je te le rappeler ?",
+                "message": (lambda r: (r[0].upper()+r[1:] if r else "Quand dois-je te le rappeler ?"))((slots.get("reason") or "").strip()),
                 "partial": {
                     "reason": slots.get("reason"),
                     "contact_name": slots.get("contact_name"),
