@@ -195,8 +195,8 @@ def create_follow_up(user_id: str, data: dict):
         "status": "pending",
         "message_context": note or reason,
     }
-    if data.get("contact_name"):
-        base["contact_name"] = data["contact_name"]
+    # contact_name est NOT NULL en base (même pour un rappel perso)
+    base["contact_name"] = (data.get("contact_name") or "Moi").strip() or "Moi"
 
     attempts = []
     if time_str:
