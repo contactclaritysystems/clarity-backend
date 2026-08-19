@@ -78,20 +78,49 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
     if "aujourd" in text:
         return base.strftime("%Y-%m-%d")
 
+    # 25 août / 25 aout / 25/08 / 25-08-2026
+    months = {
+        "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4,
+        "mai": 5, "juin": 6, "juillet": 7, "août": 8, "aout": 8,
+        "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12, "decembre": 12,
+    }
+    m = re.search(
+        r"\b(\d{1,2})\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)\b(?:\s+(\d{4}))?",
+        text,
+    )
+    if m:
+        day = int(m.group(1))
+        month = months[m.group(2)]
+        year = int(m.group(3)) if m.group(3) else base.year
+        try:
+            return datetime(year, month, day).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    m = re.search(r"\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b", text)
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        year = int(m.group(3)) if m.group(3) else base.year
+        if year < 100:
+            year += 2000
+        try:
+            return datetime(year, month, day).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
     days_map = {
         "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
         "vendredi": 4, "samedi": 5, "dimanche": 6,
     }
     prochain = "prochain" in text or "prochaine" in text
     for name, wd in days_map.items():
-        if name in text:
+        if re.search(rf"\b{name}\b", text):
             return next_weekday(base, wd, prochain=prochain).strftime("%Y-%m-%d")
 
     m = re.search(r"dans\s+(\d+)\s+jours?", text)
     if m:
         return (base + timedelta(days=int(m.group(1)))).strftime("%Y-%m-%d")
 
-    # Date ISO déjà fournie
     m = re.search(r"(20\d{2})-(\d{2})-(\d{2})", text)
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
@@ -125,18 +154,25 @@ def weekday_name_fr(date_str: str) -> str:
         return ""
 
 
-def format_fr_date(date_str: str, time_str: str) -> str:
+def format_fr_date(date_str: str, time_str: str = "") -> str:
     try:
         d = datetime.strptime(date_str, "%Y-%m-%d")
         weekdays = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
-        months = ["janvier", "février", "mars", "avril", "mai", "juin",
-                  "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
-        label = f"{weekdays[d.weekday()]} {d.day} {months[d.month - 1]}"
+        # Format humain FR : jeudi 20/08/2026 à 14:00
+        label = f"{weekdays[d.weekday()]} {d.strftime('%d/%m/%Y')}"
         if time_str:
             label += f" à {time_str}"
         return label
     except Exception:
         return f"{date_str} {time_str or ''}".strip()
+
+
+def format_ddmmyyyy(date_str: str) -> str:
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        return d.strftime("%d/%m/%Y")
+    except Exception:
+        return date_str or ""
 
 
 # ---------------------------------------------------------------------------
@@ -148,9 +184,10 @@ Réponds UNIQUEMENT en JSON valide.
 
 Champs :
 - contact_name: prénom/nom du client ou null
-- title: motif court ou null
+- title: motif court du RDV ou null (ex: match de foot, devis)
 - description: détails ou ""
-- mentioned_weekday: lundi/mardi/.../null (si l'utilisateur a dit un jour)
+- mentioned_weekday: UNIQUEMENT lundi/mardi/mercredi/jeudi/vendredi/samedi/dimanche si l'utilisateur a dit CE mot. Sinon null.
+  INTERDIT: demain, après-demain, aujourd'hui, prochain (ce ne sont PAS des weekdays)
 - mentioned_day_number: numéro du jour dans le mois ou null (ex: 25)
 
 Ne calcule PAS la date finale. Juste ce qui est dit.
@@ -262,18 +299,22 @@ def create_appointment(user_id: str, data: dict) -> Optional[dict]:
 
 
 def check_date_consistency(date_str: str, mentioned_weekday: Optional[str]) -> Optional[dict]:
-    """Si l'utilisateur a dit un jour qui ne correspond pas à la date → suggestions."""
+    """Uniquement si un VRAI jour de semaine a été dit et ne correspond pas."""
     if not date_str or not mentioned_weekday:
+        return None
+    said = mentioned_weekday.lower().strip()
+    # Ne jamais traiter demain / aujourd'hui / etc. comme weekday
+    if said in ("demain", "après-demain", "apres-demain", "aujourd'hui", "aujourdhui",
+                "prochain", "prochaine", "matin", "soir", "midi"):
+        return None
+    valid = {"lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"}
+    if said not in valid:
         return None
     actual = weekday_name_fr(date_str)
     if not actual:
         return None
-    if mentioned_weekday.lower().strip() != actual:
-        # Propose la date qui match le jour dit, et celle du numéro
-        return {
-            "actual_weekday": actual,
-            "said_weekday": mentioned_weekday.lower().strip(),
-        }
+    if said != actual:
+        return {"actual_weekday": actual, "said_weekday": said}
     return None
 
 
@@ -350,7 +391,7 @@ async def run_planning_agent(payload: dict) -> dict:
                 return {
                     "success": False,
                     "reason": "date_ambiguous",
-                    "message": f"Attention : le {slots['appointment_date']} tombe un {actual}, pas un {said}.",
+                    "message": f"Attention : le {format_ddmmyyyy(slots['appointment_date'])} tombe un {actual}, pas un {said}.",
                     "suggestions": [
                         {"label": f"{actual.capitalize()} {slots['appointment_date']}", "date": slots["appointment_date"]},
                         *([{"label": f"{said.capitalize()} {alt}", "date": alt}] if alt else []),

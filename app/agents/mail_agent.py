@@ -128,6 +128,8 @@ Règles STRICTES de mise en page :
 - Jamais tout collé sur une seule ligne
 - Jamais "l'utilisateur"
 - Respecte le ton demandé
+- N'invente JAMAIS de dates, montants, lieux ou détails non fournis dans le contenu
+- Si les dates de congés ne sont pas précisées, demande-les implicitement ou reste vague ("sur la période souhaitée") SANS inventer du 10 au 14 avril
 - JSON uniquement : {"subject": "...", "body": "..."}
 
 Exemple de body :
@@ -219,21 +221,10 @@ async def run_mail_agent(payload: dict) -> dict:
         contact_label = main_contact.get("full_name") or (to_names[0] if to_names else "")
         update_progress(request_id, "contact_found", contact_label)
 
-        if not has_enough_content:
-            return {
-                "success": False,
-                "reason": "missing_content",
-                "contact_id": main_contact.get("id"),
-                "contact_name": contact_label,
-                "request_id": request_id
-            }
-
-        update_progress(request_id, "generating_mail", contact_label)
-
         to_email = main_contact.get("email") or ""
         to_name = contact_label
 
-        # Résoudre le CC si présent
+        # Résoudre le CC AVANT missing_content (pour le garder même sans corps)
         cc_email = None
         cc_name = None
         if cc_names:
@@ -243,6 +234,23 @@ async def run_mail_agent(payload: dict) -> dict:
                 cc_name = cc_resolution["found"][0].get("full_name") or cc_names[0]
             else:
                 cc_name = cc_names[0]
+
+        if not has_enough_content:
+            out = {
+                "success": False,
+                "reason": "missing_content",
+                "contact_id": main_contact.get("id"),
+                "contact_name": contact_label,
+                "to": to_email,
+                "request_id": request_id
+            }
+            if cc_name:
+                out["cc_name"] = cc_name
+            if cc_email:
+                out["cc"] = cc_email
+            return out
+
+        update_progress(request_id, "generating_mail", contact_label)
 
         email = await write_email(
             content_summary=content_summary,
