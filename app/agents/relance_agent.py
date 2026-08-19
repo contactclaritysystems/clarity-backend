@@ -183,48 +183,62 @@ def create_follow_up(user_id: str, data: dict):
     if reason:
         reason = reason[0].upper() + reason[1:]
 
-    note = data.get("message_context") or ""
+    # Ne PAS coller l'heure dans message_context : elle va dans reminder_time
+    note = (data.get("message_context") or "").strip()
+    # Nettoyer d'éventuels "⏰ HH:MM" hérités d'anciennes versions
+    if note:
+        note = re.sub(r"^⏰\s*\d{1,2}:\d{2}\s*", "", note).strip()
+
     time_str = data.get("reminder_time")
-    if time_str and time_str not in (note or ""):
-        note = f"⏰ {time_str}\n{note}".strip()
+    if time_str:
+        time_str = str(time_str).strip()
+        # normaliser 8:00 → 08:00
+        m = re.match(r"^(\d{1,2}):(\d{2})$", time_str)
+        if m:
+            time_str = f"{int(m.group(1)):02d}:{m.group(2)}"
 
     base = {
         "user_id": user_id,
         "reason": reason,
         "reminder_date": data.get("reminder_date"),
         "status": "pending",
-        "message_context": note or reason,
+        "contact_name": (data.get("contact_name") or "Moi").strip() or "Moi",
     }
-    # contact_name est NOT NULL en base (même pour un rappel perso)
-    base["contact_name"] = (data.get("contact_name") or "Moi").strip() or "Moi"
-
-    attempts = []
-    if time_str:
-        attempts.append({**base, "reminder_time": time_str})
-    attempts.append(dict(base))
-    # sans message_context
-    attempts.append({
-        "user_id": user_id,
-        "reason": reason,
-        "reminder_date": data.get("reminder_date"),
-        "status": "pending",
-    })
+    if note and note != reason:
+        base["message_context"] = note
 
     errors = []
-    for attempt in attempts:
+
+    # 1) Idéal : colonne reminder_time
+    if time_str:
         try:
-            print(f"[Relance] INSERT {attempt}")
-            result = sb.table("follow_ups").insert(attempt).execute()
-            print(f"[Relance] RESULT data={result.data} count={getattr(result, 'count', None)}")
+            row = {**base, "reminder_time": time_str}
+            print(f"[Relance] INSERT with reminder_time {row}")
+            result = sb.table("follow_ups").insert(row).execute()
             if result.data:
                 return result.data[0], None
-            # API parfois renvoie [] sans exception
-            errors.append("Réponse vide de Supabase")
+            errors.append("Insert reminder_time: réponse vide")
         except Exception as e:
             err = str(e)
-            print(f"[Relance] INSERT ERROR: {err}")
+            print(f"[Relance] INSERT reminder_time FAIL: {err}")
             errors.append(err)
-            continue
+
+    # 2) Fallback si la colonne n'existe pas encore : note sans polluer si possible
+    try:
+        row = dict(base)
+        if time_str and "reminder_time" not in row:
+            # dernier recours lisible pour l'UI tant que la colonne manque
+            existing = row.get("message_context") or ""
+            row["message_context"] = f"⏰ {time_str}" + (f"\n{existing}" if existing else "")
+        print(f"[Relance] INSERT fallback {row}")
+        result = sb.table("follow_ups").insert(row).execute()
+        if result.data:
+            return result.data[0], None
+        errors.append("Insert fallback: réponse vide")
+    except Exception as e:
+        err = str(e)
+        print(f"[Relance] INSERT fallback FAIL: {err}")
+        errors.append(err)
 
     return None, (errors[-1] if errors else "erreur inconnue")
 
