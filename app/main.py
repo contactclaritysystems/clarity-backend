@@ -187,6 +187,8 @@ class StyleCreatePayload(BaseModel):
     user_id: str
     label: str
     key: Optional[str] = None
+    id: Optional[str] = None
+    style_id: Optional[str] = None
     example_message: Optional[str] = ""
     opening: Optional[str] = ""
     closing: Optional[str] = ""

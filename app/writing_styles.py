@@ -128,7 +128,9 @@ def seed_defaults(user_id: str) -> None:
 
 
 def create_style(user_id: str, data: dict) -> Dict[str, Any]:
-    """Crée OU met à jour un style. Si key est fourni → UPDATE de cette ligne."""
+    """Crée OU met à jour un style.
+    Priorité : id > key > insert nouveau.
+    """
     sb = get_supabase()
     if not sb or not user_id:
         return {"success": False, "message": "Supabase / user_id manquant"}
@@ -137,10 +139,11 @@ def create_style(user_id: str, data: dict) -> Dict[str, Any]:
     if not label:
         return {"success": False, "message": "Le nom du style est obligatoire"}
 
+    style_id = (data.get("id") or data.get("style_id") or "").strip() or None
     key = (data.get("key") or "").strip()
     if not key:
-        import re
-        key = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:40] or "style"
+        import re as _re
+        key = _re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:40] or "style"
 
     fields = {
         "label": label,
@@ -150,8 +153,23 @@ def create_style(user_id: str, data: dict) -> Dict[str, Any]:
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
+    print(f"[Styles] save user_id={user_id} id={style_id} key={key} fields={fields}")
+
     try:
-        # 1) Existe déjà ?
+        # --- UPDATE par id ---
+        if style_id:
+            upd = (
+                sb.table("user_writing_styles")
+                .update(fields)
+                .eq("id", style_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+            print(f"[Styles] update by id → {upd.data}")
+            if upd.data:
+                return {"success": True, "style": upd.data[0], "updated": True}
+
+        # --- UPDATE par key ---
         existing = (
             sb.table("user_writing_styles")
             .select("*")
@@ -160,45 +178,44 @@ def create_style(user_id: str, data: dict) -> Dict[str, Any]:
             .limit(1)
             .execute()
         )
+        print(f"[Styles] existing by key → {existing.data}")
+
         if existing.data:
-            # UPDATE réel
-            upd = (
-                sb.table("user_writing_styles")
-                .update(fields)
-                .eq("user_id", user_id)
-                .eq("key", key)
-                .execute()
-            )
-            print(f"[Styles] UPDATE key={key} data={upd.data}")
+            row_id = existing.data[0].get("id")
+            q = sb.table("user_writing_styles").update(fields).eq("user_id", user_id)
+            if row_id:
+                q = q.eq("id", row_id)
+            else:
+                q = q.eq("key", key)
+            upd = q.execute()
+            print(f"[Styles] update by key → {upd.data}")
             if upd.data:
                 return {"success": True, "style": upd.data[0], "updated": True}
-            # re-select pour confirmer
-            again = (
-                sb.table("user_writing_styles")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("key", key)
-                .limit(1)
-                .execute()
-            )
-            if again.data:
-                # compare values
-                row = again.data[0]
-                if (
-                    row.get("example_message") == fields["example_message"]
-                    and row.get("label") == fields["label"]
-                ):
-                    return {"success": True, "style": row, "updated": True}
-                return {
-                    "success": False,
-                    "message": "Mise à jour bloquée (droits Supabase / RLS ?)",
-                }
-            return {"success": False, "message": "Update sans retour"}
 
-        # 2) INSERT nouveau
-        row = {"user_id": user_id, "key": key, **fields}
-        ins = sb.table("user_writing_styles").insert(row).execute()
-        print(f"[Styles] INSERT key={key} data={ins.data}")
+            # UPDATE a renvoyé [] → souvent RLS / mauvaise clé service
+            # Tentative delete+insert (même key)
+            try:
+                sb.table("user_writing_styles").delete().eq("user_id", user_id).eq(
+                    "key", key
+                ).execute()
+            except Exception as de:
+                print(f"[Styles] delete before reinsert: {de}")
+            ins_row = {"user_id": user_id, "key": key, **fields}
+            if row_id:
+                ins_row["id"] = row_id
+            ins = sb.table("user_writing_styles").insert(ins_row).execute()
+            print(f"[Styles] reinsert → {ins.data}")
+            if ins.data:
+                return {"success": True, "style": ins.data[0], "updated": True}
+            return {
+                "success": False,
+                "message": "Impossible de modifier le style (vérifiez SUPABASE_KEY = service_role et les policies RLS).",
+            }
+
+        # --- INSERT ---
+        ins_row = {"user_id": user_id, "key": key, **fields}
+        ins = sb.table("user_writing_styles").insert(ins_row).execute()
+        print(f"[Styles] insert → {ins.data}")
         if ins.data:
             return {"success": True, "style": ins.data[0], "updated": False}
         return {"success": False, "message": "Insert sans retour"}
