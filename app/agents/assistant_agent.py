@@ -62,15 +62,23 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
                 t = a.get("appointment_time") or ""
                 title = a.get("title") or "RDV"
                 contact = a.get("contact_name") or ""
-                st = a.get("status") or ""
+                st = (a.get("status") or "").lower()
+                status_fr = {
+                    "done": "terminé",
+                    "completed": "terminé",
+                    "scheduled": "à venir",
+                    "pending": "à venir",
+                    "cancelled": "annulé",
+                    "canceled": "annulé",
+                }.get(st, "")
                 bit = f"- {d}"
                 if t:
-                    bit += f" {t}"
+                    bit += f" à {t}"
                 bit += f" — {title}"
                 if contact:
-                    bit += f" ({contact})"
-                if st:
-                    bit += f" [{st}]"
+                    bit += f" avec {contact}"
+                if status_fr:
+                    bit += f" ({status_fr})"
                 lines.append(bit)
         else:
             lines.append("Rendez-vous (14 j) : aucun.")
@@ -139,20 +147,18 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
     return "\n".join(lines)
 
 
-SYSTEM = """Tu es Clarity, l'assistante pro d'un artisan / dirigeant de TPE-PME française.
-Tu es précise, claire, utile, jamais bavarde.
+SYSTEM = """Tu es Clarity, l'assistante pro de l'utilisateur (artisan / dirigeant TPE-PME).
+Tu lui parles DIRECTEMENT en français, tutoiement naturel (tu / ton / ta).
+Jamais "l'utilisateur", jamais "vous avez" à la 3e personne, jamais "le client du compte".
 
 RÈGLES :
-1. Priorité absolue au CONTEXTE UTILISATEUR fourni (RDV, rappels, contacts).
-2. Si la réponse est dans le contexte → réponds avec les faits (dates, heures, noms).
-3. Si l'info n'est pas dans le contexte et demande des données externes récentes
-   (actu, cours, météo, lois) → dis-le honnêtement et propose ce que Clarity
-   peut faire à la place (noter un rappel, un RDV, préparer un mail).
-4. N'invente jamais de rendez-vous, contacts ou horaires.
-5. Réponds en français, ton professionnel et humain.
-6. Structure courte : réponse directe, puis détails si besoin.
-7. Tu n'exécutes pas toi-même l'envoi de mail / création de RDV : tu informes
-   et tu oriente (« demande à Clarity d'ajouter un RDV… ») si besoin.
+1. Priorité au CONTEXTE fourni (RDV, rappels, contacts).
+2. Si l'info est dans le contexte → réponds avec les faits (dates jj/mm, heures, noms).
+3. N'affiche JAMAIS les codes techniques de statut (done, scheduled, pending, cancelled…).
+   Traduis si besoin : terminé, à venir, en attente.
+4. N'invente rien. Si tu ne sais pas → dis-le simplement.
+5. Réponses courtes et claires.
+6. Tu n'exécutes pas les actions (mail, RDV) : tu informes seulement.
 """
 
 

@@ -32,15 +32,27 @@ AGENTS DISPONIBLES
 - "mail" : tout ce qui concerne un email (envoyer, répondre, relancer, préparer un mail, mettre quelqu'un en copie…)
 - "redaction" : rédiger un contenu long qui n'est PAS un email (post LinkedIn, note, compte-rendu, document, message Slack/Teams non-email…)
 - "assistant" : questions, conseils, explications, idées, résumés, reformulations, calculs, aide générale
-- "planning" : rendez-vous, réunions, agenda, disponibilité, planifier un créneau
-- "relance" : rappel personnel, "fais-moi penser", "rappelle-moi", "n'oublie pas", relancer un client, reminder
+- "planning" : CRÉER un rendez-vous / réunion (pas consulter l'agenda)
+- "relance" : CRÉER un rappel ("fais-moi penser", "rappelle-moi") — pas lister les rappels existants
+- Pour CONSULTER agenda / rappels / contacts → "assistant"
 
 ═══════════════════════════════════════
 RÈGLES DE ROUTAGE (dans l'ordre)
 ═══════════════════════════════════════
+0. CONSULTATION vs ACTION (CRITIQUE) :
+   - Si l'utilisateur DEMANDE UNE INFO / un résumé / une liste
+     (ex: "qu'est-ce que j'ai comme RDV", "mes rappels en attente",
+      "résume ma journée", "est-ce que j'ai le contact de…",
+      "quels sont mes rendez-vous", "ai-je quelque chose demain")
+     → TOUJOURS "assistant"
+   - "planning" UNIQUEMENT pour CRÉER / MODIFIER / ANNULER un rendez-vous
+     (ex: "ajoute un RDV", "planifie une réunion", "note un rendez-vous avec…")
+   - "relance" UNIQUEMENT pour CRÉER un rappel
+     (ex: "fais-moi penser", "rappelle-moi de…", "crée un rappel")
+
 1. Si la demande implique d'ENVOYER ou PRÉPARER un email → "mail"
-2. Si c'est explicitement un rendez-vous / une réunion à planifier → "planning"
-3. Si c'est une relance / un suivi d'action → "relance"
+2. Si c'est CRÉER un rendez-vous / une réunion → "planning"
+3. Si c'est CRÉER un rappel / "fais-moi penser" → "relance"
 4. Si c'est une rédaction de contenu (LinkedIn, CR, note…) → "redaction"
 5. Sinon → "assistant"
 
@@ -123,9 +135,6 @@ async def run_orchestrator(payload: dict) -> dict:
         if agent not in allowed:
             agent = "assistant"
 
-        # Pour l'instant planning/relance n'ont pas encore d'agent dédié
-        # → on les route vers assistant avec une instruction claire
-        # (prépare le terrain pour plus tard)
         final_agent = agent
 
         return {
@@ -149,14 +158,20 @@ async def run_orchestrator(payload: dict) -> dict:
             "contacte", "réponds à", "reponds a", "relance par mail", "mets en copie"
         ]
         redaction_words = ["linkedin", "compte-rendu", "compte rendu", "rédige un", "redige un", "post"]
-        planning_words = ["rendez-vous", "rendez vous", "réunion", "reunion", "agenda", "planifie", "disponible"]
+        planning_create = ["ajoute un rdv", "ajoute un rendez-vous", "planifie", "note un rdv", "prend un rdv", "prends un rdv"]
+        relance_create = ["fais-moi penser", "fais moi penser", "rappelle-moi", "rappelle moi", "crée un rappel", "creer un rappel"]
+        question_words = ["qu'est-ce", "quest-ce", "quels", "quelles", "ai-je", "est-ce que", "résume", "resume", "combien", "montre", "liste"]
 
-        if any(w in lower for w in mail_words):
+        if any(w in lower for w in question_words):
+            agent = "assistant"
+        elif any(w in lower for w in mail_words):
             agent = "mail"
         elif any(w in lower for w in redaction_words):
             agent = "redaction"
-        elif any(w in lower for w in planning_words):
-            agent = "assistant"  # planning pas encore implémenté
+        elif any(w in lower for w in relance_create):
+            agent = "relance"
+        elif any(w in lower for w in planning_create):
+            agent = "planning"
         else:
             agent = "assistant"
 
