@@ -1,8 +1,10 @@
 """
 Agent Rédaction Clarity — natif Render
-Textes pro : LinkedIn, comptes-rendus, notes, messages, annonces…
+Premium : ne rédige que si les infos suffisent, sinon pose UNE question claire.
+N'invente jamais dates, montants, détails produit, etc.
 """
 
+import json
 import os
 from datetime import datetime
 from typing import Optional
@@ -20,26 +22,91 @@ def get_client():
     return OpenAI(api_key=api_key)
 
 
-SYSTEM = """Tu es le module de rédaction de Clarity Systems, SaaS français ultra-premium
-pour dirigeants et artisans (TPE-PME).
+ANALYZE_SYSTEM = """Tu analyses une demande de RÉDACTION pour Clarity (SaaS pro français).
+Réponds UNIQUEMENT en JSON valide.
 
-Tu rédiges des textes prêts à l'emploi, en français soigné.
+Décide si on a assez d'éléments pour rédiger un texte UTILE et HONNÊTE,
+sans inventer de faits (offre, prix, dates, bénéfices, public cible…).
 
-RÈGLES :
-1. VOUVOIEMENT si le texte s'adresse à un client / partenaire (sauf si l'utilisateur demande le tutoiement).
-2. N'invente JAMAIS de dates, montants, noms, chiffres non fournis dans la demande.
-3. Si des infos manquent pour un texte précis (dates de congés, montant, destinataire…),
-   rédige la meilleure version possible SANS inventer, ou signale brièvement ce qui manque.
-4. Adapte le format :
-   - post LinkedIn → accroche + 2–4 paragraphes courts + éventuelle conclusion
-   - compte-rendu → structuré (contexte, points, décisions, suite)
-   - message / SMS → court
-   - note / annonce → clair et professionnel
-5. Pas de markdown excessif (# ## **) sauf si utile pour un CR ; pour LinkedIn, texte naturel.
-6. Pas de blabla d'intro ("Voici un texte que j'ai rédigé…") : donne DIRECTEMENT le texte demandé.
-7. Si l'historique montre une demande de reformulation (plus court, plus pro, plus chaleureux…),
-   repartir du dernier texte et appliquer UNIQUEMENT la modification demandée.
+has_enough = true SEULEMENT si la demande contient déjà le fond nécessaire
+(ex: "rédige un post LinkedIn pour dire que j'embauche un apprenti carrossier à Lyon")
+OU si l'historique fournit déjà ces détails.
+
+has_enough = false si la demande est trop vague
+(ex: "rédige mon offre Clarity", "fais un texte commercial", "écris ma présentation")
+→ alors "question" = UNE seule question polie en vouvoiement, courte, pour obtenir le minimum.
+
+{
+  "has_enough": true/false,
+  "question": "null ou une question en français, vouvoiement",
+  "doc_type": "linkedin|compte_rendu|message|offre|note|autre",
+  "brief": "résumé de ce qu'on sait déjà"
+}
 """
+
+
+WRITE_SYSTEM = """Tu es le module de rédaction de Clarity Systems (SaaS français ultra-premium).
+
+RÈGLES STRICTES :
+1. N'invente JAMAIS de faits non fournis (prix, dates, fonctionnalités, noms, chiffres).
+2. VOUVOIEMENT dans les textes adressés à un client, sauf demande contraire.
+3. Donne DIRECTEMENT le texte demandé (pas "Voici un texte…").
+4. Adapte le format (LinkedIn, CR, message, offre, note).
+5. Si l'historique contient une reformulation (plus court, plus pro…),
+   repartir du dernier texte et appliquer uniquement la modification.
+6. Français soigné, ton professionnel, clair, premium.
+"""
+
+
+async def analyze_request(instruction: str, history: str) -> dict:
+    user = f"Demande : {instruction}"
+    if history:
+        user += f"\n\nHistorique récent :\n{history}"
+    response = get_client().chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": ANALYZE_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.1,
+        max_tokens=400,
+        response_format={"type": "json_object"},
+    )
+    return json.loads(response.choices[0].message.content)
+
+
+async def write_text(instruction: str, history: str, user_name: str, brief: str = "") -> str:
+    today = datetime.now().strftime("%d/%m/%Y")
+    user_msg = f"Date du jour : {today}\n"
+    if user_name:
+        user_msg += f"Auteur possible : {user_name}\n"
+    if brief:
+        user_msg += f"Brief déjà connu : {brief}\n"
+    if history:
+        user_msg += f"\n=== HISTORIQUE ===\n{history}\n"
+    user_msg += f"\n=== DEMANDE ===\n{instruction}\n"
+    user_msg += "\nRédige le texte, prêt à copier. N'invente aucun fait manquant."
+
+    response = get_client().chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": WRITE_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0.45,
+        max_tokens=1200,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+def is_rewrite_request(instruction: str) -> bool:
+    t = (instruction or "").lower().strip()
+    keys = [
+        "plus court", "plus long", "plus pro", "plus professionnel",
+        "plus chaleureux", "plus formel", "reformule", "réécris", "reecris",
+        "autre version", "change le ton", "raccourci", "allonge",
+    ]
+    return any(k in t for k in keys)
 
 
 async def run_redaction_agent(payload: dict) -> dict:
@@ -51,32 +118,50 @@ async def run_redaction_agent(payload: dict) -> dict:
     if not instruction:
         return {
             "success": False,
+            "reason": "missing_content",
             "message": "Que souhaitez-vous que je rédige ?",
             "request_id": request_id,
         }
 
     try:
-        today = datetime.now().strftime("%d/%m/%Y")
-        user_msg = f"Date du jour : {today}\n"
-        if user_name:
-            user_msg += f"Auteur / signataire possible : {user_name}\n"
-        if history:
-            user_msg += f"\n=== HISTORIQUE (pour reformulations) ===\n{history}\n"
-        user_msg += f"\n=== DEMANDE ===\n{instruction}\n"
-        user_msg += "\nRédige le texte demandé, prêt à copier."
+        # Reformulation sur un texte déjà produit → on rédige directement
+        if is_rewrite_request(instruction) and history:
+            text = await write_text(instruction, history, user_name)
+            if not text:
+                text = "Je n'ai pas pu reformuler. Précisez votre demande."
+            return {
+                "success": True,
+                "title": "Rédaction",
+                "message": text,
+                "content": text,
+                "request_id": request_id,
+            }
 
-        response = get_client().chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM},
-                {"role": "user", "content": user_msg},
-            ],
-            temperature=0.5,
-            max_tokens=1200,
-        )
-        text = (response.choices[0].message.content or "").strip()
+        analysis = await analyze_request(instruction, history)
+        has_enough = bool(analysis.get("has_enough"))
+        question = (analysis.get("question") or "").strip()
+        brief = (analysis.get("brief") or "").strip()
+
+        if not has_enough:
+            if not question:
+                question = (
+                    "Bien sûr. Pouvez-vous me préciser le sujet et les points "
+                    "essentiels à inclure (sans détails inventés) ?"
+                )
+            return {
+                "success": False,
+                "reason": "missing_content",
+                "message": question,
+                "request_id": request_id,
+            }
+
+        text = await write_text(instruction, history, user_name, brief=brief)
         if not text:
-            text = "Je n'ai pas pu générer le texte. Reformulez votre demande."
+            return {
+                "success": False,
+                "message": "Je n'ai pas pu générer le texte. Reformulez votre demande.",
+                "request_id": request_id,
+            }
 
         return {
             "success": True,
