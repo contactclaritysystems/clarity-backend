@@ -147,19 +147,87 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
     return "\n".join(lines)
 
 
-SYSTEM = """Tu es Clarity, l'assistante pro de l'utilisateur (artisan / dirigeant TPE-PME).
-Tu lui parles DIRECTEMENT en français, tutoiement naturel (tu / ton / ta).
-Jamais "l'utilisateur", jamais "vous avez" à la 3e personne, jamais "le client du compte".
+SYSTEM = """Tu es Clarity, l'assistante professionnelle d'un dirigeant / artisan (TPE-PME).
+Tu vous adressez TOUJOURS à lui avec le VOUVOIEMENT (vous / votre / vos).
+Jamais de tutoiement. Jamais "l'utilisateur". Jamais la 3e personne.
 
 RÈGLES :
-1. Priorité au CONTEXTE fourni (RDV, rappels, contacts).
-2. Si l'info est dans le contexte → réponds avec les faits (dates jj/mm, heures, noms).
-3. N'affiche JAMAIS les codes techniques de statut (done, scheduled, pending, cancelled…).
-   Traduis si besoin : terminé, à venir, en attente.
-4. N'invente rien. Si tu ne sais pas → dis-le simplement.
-5. Réponses courtes et claires.
-6. Tu n'exécutes pas les actions (mail, RDV) : tu informes seulement.
+1. Priorité au CONTEXTE CLARITY (RDV, rappels, contacts) pour tout ce qui concerne SON activité.
+2. Si une section "RECHERCHE WEB" est fournie → utilise-la pour les faits d'actualité / chiffres / infos externes.
+3. N'affiche JAMAIS les codes techniques (done, scheduled, pending…).
+   Dis plutôt : terminé, à venir, en attente.
+4. N'invente pas de RDV, contacts ou horaires absents du contexte.
+5. Réponses claires, structurées, professionnelles, pas trop longues.
+6. Vous n'exécutez pas les actions (mail, RDV) : vous informez seulement.
 """
+
+
+
+def needs_web_search(instruction: str) -> bool:
+    """Heuristique : questions d'actu / faits externes."""
+    t = (instruction or "").lower()
+    keys = [
+        "bitcoin", "crypto", "bourse", "cours de", "prix de", "météo", "meteo",
+        "actualité", "actualite", "news", "aujourd'hui en france", "qui a gagné",
+        "résultat du match", "resultat du match", "élection", "election",
+        "inflation", "taux", "dollar", "euro", "nasdaq", "cac 40",
+        "dernières infos", "dernieres infos", "temps réel", "temps reel",
+        "google", "wikipedia", "c'est quoi", "qui est", "quand a eu lieu",
+    ]
+    # Questions purement perso Clarity → pas de web
+    perso = ["rendez-vous", "rdv", "rappel", "relance", "contact", "mon planning",
+             "ma journée", "mes rendez-vous", "ai-je", "j'ai comme"]
+    if any(p in t for p in perso) and not any(k in t for k in keys):
+        return False
+    if any(k in t for k in keys):
+        return True
+    # Formulations ouvertes d'info générale
+    if t.startswith(("c'est quoi", "que s'est-il", "quelle est la", "quel est le", "combien vaut")):
+        return True
+    return False
+
+
+def web_search(query: str, max_results: int = 5) -> str:
+    """Recherche web légère (DuckDuckGo) — sans clé API."""
+    try:
+        import json
+        import urllib.parse
+        import urllib.request
+        q = urllib.parse.quote(query)
+        url = f"https://api.duckduckgo.com/?q={q}&format=json&no_html=1&skip_disambig=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "ClarityAssistant/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        parts = []
+        if data.get("AbstractText"):
+            parts.append(data["AbstractText"])
+            if data.get("AbstractURL"):
+                parts.append(f"Source: {data['AbstractURL']}")
+        for t in (data.get("RelatedTopics") or [])[:max_results]:
+            if isinstance(t, dict) and t.get("Text"):
+                parts.append(t["Text"])
+            elif isinstance(t, dict) and "Topics" in t:
+                for sub in t["Topics"][:2]:
+                    if sub.get("Text"):
+                        parts.append(sub["Text"])
+        # Fallback HTML lite si vide
+        if not parts:
+            url2 = f"https://html.duckduckgo.com/html/?q={q}"
+            req2 = urllib.request.Request(url2, headers={"User-Agent": "Mozilla/5.0 ClarityBot"})
+            with urllib.request.urlopen(req2, timeout=8) as resp2:
+                html = resp2.read().decode("utf-8", errors="ignore")
+            import re
+            snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</', html, re.I | re.S)
+            for s in snippets[:max_results]:
+                clean = re.sub(r"<[^>]+>", "", s).strip()
+                if clean:
+                    parts.append(clean)
+        if not parts:
+            return ""
+        return "\n".join(f"- {p}" for p in parts[:max_results])
+    except Exception as e:
+        print(f"[Assistant web_search] {e}")
+        return ""
 
 
 async def run_assistant_agent(payload: dict) -> dict:
@@ -180,10 +248,24 @@ async def run_assistant_agent(payload: dict) -> dict:
         context = load_user_context(user_id, user_name)
         today_fr = datetime.now().strftime("%d/%m/%Y %H:%M")
 
+        web_block = ""
+        if needs_web_search(instruction):
+            raw = web_search(instruction)
+            if raw:
+                web_block = f"=== RECHERCHE WEB (faits récupérés maintenant) ===\n{raw}\n\n"
+            else:
+                web_block = (
+                    "=== RECHERCHE WEB ===\n"
+                    "Aucun résultat fiable récupéré. Indiquez-le poliment et "
+                    "proposez de reformuler ou de vérifier sur un site officiel.\n\n"
+                )
+
         user_msg = (
             f"Date/heure actuelle : {today_fr}\n\n"
             f"=== CONTEXTE CLARITY (données réelles) ===\n{context}\n\n"
         )
+        if web_block:
+            user_msg += web_block
         if history:
             user_msg += f"=== HISTORIQUE RÉCENT ===\n{history}\n\n"
         user_msg += f"=== QUESTION ===\n{instruction}"
