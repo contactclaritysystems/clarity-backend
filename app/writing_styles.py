@@ -128,6 +128,7 @@ def seed_defaults(user_id: str) -> None:
 
 
 def create_style(user_id: str, data: dict) -> Dict[str, Any]:
+    """Crée OU met à jour un style. Si key est fourni → UPDATE de cette ligne."""
     sb = get_supabase()
     if not sb or not user_id:
         return {"success": False, "message": "Supabase / user_id manquant"}
@@ -141,21 +142,17 @@ def create_style(user_id: str, data: dict) -> Dict[str, Any]:
         import re
         key = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:40] or "style"
 
-    row = {
-        "user_id": user_id,
-        "key": key,
+    fields = {
         "label": label,
         "example_message": (data.get("example_message") or "").strip(),
         "opening": (data.get("opening") or "").strip(),
         "closing": (data.get("closing") or "").strip(),
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
+
     try:
-        res = sb.table("user_writing_styles").upsert(row, on_conflict="user_id,key").execute()
-        if res.data:
-            return {"success": True, "style": res.data[0]}
-        # fallback select
-        sel = (
+        # 1) Existe déjà ?
+        existing = (
             sb.table("user_writing_styles")
             .select("*")
             .eq("user_id", user_id)
@@ -163,11 +160,52 @@ def create_style(user_id: str, data: dict) -> Dict[str, Any]:
             .limit(1)
             .execute()
         )
-        if sel.data:
-            return {"success": True, "style": sel.data[0]}
-        return {"success": True, "style": row}
+        if existing.data:
+            # UPDATE réel
+            upd = (
+                sb.table("user_writing_styles")
+                .update(fields)
+                .eq("user_id", user_id)
+                .eq("key", key)
+                .execute()
+            )
+            print(f"[Styles] UPDATE key={key} data={upd.data}")
+            if upd.data:
+                return {"success": True, "style": upd.data[0], "updated": True}
+            # re-select pour confirmer
+            again = (
+                sb.table("user_writing_styles")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("key", key)
+                .limit(1)
+                .execute()
+            )
+            if again.data:
+                # compare values
+                row = again.data[0]
+                if (
+                    row.get("example_message") == fields["example_message"]
+                    and row.get("label") == fields["label"]
+                ):
+                    return {"success": True, "style": row, "updated": True}
+                return {
+                    "success": False,
+                    "message": "Mise à jour bloquée (droits Supabase / RLS ?)",
+                }
+            return {"success": False, "message": "Update sans retour"}
+
+        # 2) INSERT nouveau
+        row = {"user_id": user_id, "key": key, **fields}
+        ins = sb.table("user_writing_styles").insert(row).execute()
+        print(f"[Styles] INSERT key={key} data={ins.data}")
+        if ins.data:
+            return {"success": True, "style": ins.data[0], "updated": False}
+        return {"success": False, "message": "Insert sans retour"}
     except Exception as e:
-        print(f"[Styles] create error: {e}")
+        print(f"[Styles] create/update error: {e}")
+        import traceback
+        traceback.print_exc()
         return {"success": False, "message": str(e)}
 
 
