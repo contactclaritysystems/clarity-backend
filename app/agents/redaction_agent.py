@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+from app.memory import load_memory, memory_as_text, extract_and_save_memory
 
 load_dotenv()
 MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -28,13 +29,15 @@ Réponds UNIQUEMENT en JSON valide.
 Décide si on a assez d'éléments pour rédiger un texte UTILE et HONNÊTE,
 sans inventer de faits (offre, prix, dates, bénéfices, public cible…).
 
-has_enough = true SEULEMENT si la demande contient déjà le fond nécessaire
-(ex: "rédige un post LinkedIn pour dire que j'embauche un apprenti carrossier à Lyon")
-OU si l'historique fournit déjà ces détails.
+has_enough = true SEULEMENT si la demande + l'historique + la MÉMOIRE BUSINESS
+fournissent le fond nécessaire pour rédiger SANS inventer.
 
-has_enough = false si la demande est trop vague
-(ex: "rédige mon offre Clarity", "fais un texte commercial", "écris ma présentation")
-→ alors "question" = UNE seule question polie en vouvoiement, courte, pour obtenir le minimum.
+has_enough = false si il manque encore des éléments clés
+→ "question" = UNE seule question polie en vouvoiement, ciblée, pour combler LE prochain trou
+  (on en posera d'autres au tour suivant si besoin).
+
+Si la mémoire contient déjà current_offer / product_name, NE PAS redemander
+ce qui est déjà connu, sauf si l'utilisateur parle d'une NOUVELLE offre.
 
 {
   "has_enough": true/false,
@@ -58,8 +61,10 @@ RÈGLES STRICTES :
 """
 
 
-async def analyze_request(instruction: str, history: str) -> dict:
+async def analyze_request(instruction: str, history: str, memory_text: str = "") -> dict:
     user = f"Demande : {instruction}"
+    if memory_text:
+        user += f"\n\n=== MÉMOIRE BUSINESS (persistante) ===\n{memory_text}"
     if history:
         user += f"\n\nHistorique récent :\n{history}"
     response = get_client().chat.completions.create(
@@ -75,11 +80,13 @@ async def analyze_request(instruction: str, history: str) -> dict:
     return json.loads(response.choices[0].message.content)
 
 
-async def write_text(instruction: str, history: str, user_name: str, brief: str = "") -> str:
+async def write_text(instruction: str, history: str, user_name: str, brief: str = "", memory_text: str = "") -> str:
     today = datetime.now().strftime("%d/%m/%Y")
     user_msg = f"Date du jour : {today}\n"
     if user_name:
         user_msg += f"Auteur possible : {user_name}\n"
+    if memory_text:
+        user_msg += f"\n=== MÉMOIRE BUSINESS ===\n{memory_text}\n"
     if brief:
         user_msg += f"Brief déjà connu : {brief}\n"
     if history:
@@ -124,20 +131,25 @@ async def run_redaction_agent(payload: dict) -> dict:
         }
 
     try:
+        user_id = payload.get("user_id")
+        facts = load_memory(user_id)
+        memory_text = memory_as_text(facts)
+
         # Reformulation sur un texte déjà produit → on rédige directement
         if is_rewrite_request(instruction) and history:
-            text = await write_text(instruction, history, user_name)
-            if not text:
-                text = "Je n'ai pas pu reformuler. Précisez votre demande."
+            text_out = await write_text(instruction, history, user_name, memory_text=memory_text)
+            if not text_out:
+                text_out = "Je n'ai pas pu reformuler. Précisez votre demande."
+            await extract_and_save_memory(user_id, instruction, text_out, history)
             return {
                 "success": True,
                 "title": "Rédaction",
-                "message": text,
-                "content": text,
+                "message": text_out,
+                "content": text_out,
                 "request_id": request_id,
             }
 
-        analysis = await analyze_request(instruction, history)
+        analysis = await analyze_request(instruction, history, memory_text=memory_text)
         has_enough = bool(analysis.get("has_enough"))
         question = (analysis.get("question") or "").strip()
         brief = (analysis.get("brief") or "").strip()
@@ -146,7 +158,7 @@ async def run_redaction_agent(payload: dict) -> dict:
             if not question:
                 question = (
                     "Bien sûr. Pouvez-vous me préciser le sujet et les points "
-                    "essentiels à inclure (sans détails inventés) ?"
+                    "essentiels à inclure ?"
                 )
             return {
                 "success": False,
@@ -155,19 +167,23 @@ async def run_redaction_agent(payload: dict) -> dict:
                 "request_id": request_id,
             }
 
-        text = await write_text(instruction, history, user_name, brief=brief)
-        if not text:
+        text_out = await write_text(
+            instruction, history, user_name, brief=brief, memory_text=memory_text
+        )
+        if not text_out:
             return {
                 "success": False,
                 "message": "Je n'ai pas pu générer le texte. Reformulez votre demande.",
                 "request_id": request_id,
             }
 
+        await extract_and_save_memory(user_id, instruction, text_out, history)
+
         return {
             "success": True,
             "title": "Rédaction",
-            "message": text,
-            "content": text,
+            "message": text_out,
+            "content": text_out,
             "request_id": request_id,
         }
     except Exception as e:

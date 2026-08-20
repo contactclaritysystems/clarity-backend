@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Any, Dict, List
 from openai import OpenAI
 from dotenv import load_dotenv
+from app.memory import load_memory, memory_as_text
 from supabase import create_client, Client
 
 load_dotenv()
@@ -346,6 +347,9 @@ async def run_assistant_agent(payload: dict) -> dict:
 
     try:
         context = load_user_context(user_id, user_name)
+        mem = memory_as_text(load_memory(user_id))
+        if mem:
+            context = context + "\n\n" + mem
         today_fr = datetime.now().strftime("%d/%m/%Y %H:%M")
 
         web_block = ""
