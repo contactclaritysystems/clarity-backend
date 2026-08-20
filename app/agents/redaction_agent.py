@@ -24,29 +24,31 @@ def get_client():
 ANALYZE_SYSTEM = """Tu prépares une rédaction pour Clarity (SaaS pro français).
 Réponds UNIQUEMENT en JSON valide.
 
-Objectif : rédiger DÈS QUE POSSIBLE, sans inventer, sans harceler l'utilisateur.
+RÈGLE MÉMOIRE (critique) :
+- La MÉMOIRE BUSINESS contient d'éventuelles anciennes infos (ex: offre 7 jours gratuits).
+- Si l'utilisateur dit "nouvelle offre", "offre de la rentrée", "notre offre" SANS détailler,
+  tu ne dois PAS considérer que la mémoire suffit à elle seule.
+  → has_enough = false
+  → question polie qui soit :
+     a) demande en quoi consiste CETTE offre, OU
+     b) confirme : "S'agit-il toujours de [résumé mémoire] ?"
+- Tu peux utiliser la mémoire SEULEMENT si l'utilisateur confirme, ou s'il reparle
+  clairement de la même offre déjà décrite dans l'historique de CETTE conversation.
 
-has_enough = true DÈS QUE tu as :
-- un type de texte (post, offre, message…) OU que c'est implicite
-- ET le sujet principal (produit / offre / annonce) avec au moins UNE promesse
-  ou description (ex: "7 jours gratuits", "agent IA admin pour patrons")
+has_enough = true seulement si, dans la demande + historique de session (+ mémoire
+confirmée), tu as le sujet concret de CETTE rédaction.
 
-Dès que le brief ressemble à :
-"Post LinkedIn · 7 jours gratuits · agent IA qui aide les patrons sur l'admin"
-→ has_enough DOIT être true. N'ajoute PAS de questions sur avantages, CTA,
-ton, emojis, public précis, etc. Ces détails sont OPTIONNELS : le rédacteur
-écrira un bon post avec ce qui est là.
+has_enough = false si vague ("nouvelle offre", "post pour mon produit") sans détail
+dans l'historique de session.
 
-has_enough = false UNIQUEMENT si le sujet est encore vide ou incompréhensible
-(ex: "fais un post" sans aucun thème, "rédige mon offre" sans dire laquelle).
-
-question = une seule phrase, vouvoiement. null si has_enough.
-brief = résumé court de tout ce qui est acquis.
+question = une seule phrase, vouvoiement.
+brief = ce qui est acquis pour CETTE demande (ne pas coller toute la mémoire
+comme si c'était validé pour une "nouvelle" offre).
 
 {
   "has_enough": true/false,
   "question": "null ou une question",
-  "brief": "ce qui est déjà compris, court",
+  "brief": "court",
   "doc_type": "linkedin|offre|message|compte_rendu|note|autre"
 }
 """
@@ -178,14 +180,51 @@ async def run_redaction_agent(payload: dict) -> dict:
         brief = (analysis.get("brief") or "").strip()
         doc_type = (analysis.get("doc_type") or "").strip()
 
-        # Garde-fou : si le brief est déjà substantiel, on rédige
-        brief_l = (brief + " " + instruction + " " + (history or "")).lower()
+        # Garde-fou : ne PAS forcer l'écriture si la demande parle d'une
+        # "nouvelle offre" / "offre de la rentrée" sans détail dans l'historique
+        inst_l = (instruction or "").lower()
+        hist_l = (history or "").lower()
+        vague_new = any(
+            p in inst_l
+            for p in (
+                "nouvelle offre",
+                "nouvel offre",
+                "offre de la rentrée",
+                "offre de rentree",
+                "notre offre",
+                "mon offre",
+            )
+        )
+        # détails concrets donnés dans CETTE conversation (pas seulement mémoire)
+        session_detail = any(
+            p in hist_l or p in inst_l
+            for p in (
+                "jour", "gratuit", "€", "euro", "%", "agent", "essai",
+                "prix", "mois", "semaine", "aide", "admin",
+            )
+        )
+        if vague_new and not session_detail and not hist_l.strip():
+            has_enough = False
+            if not question:
+                if memory_text:
+                    question = (
+                        "Souhaitez-vous que je m'appuie sur l'offre déjà enregistrée "
+                        "dans votre espace, ou s'agit-il d'une offre différente à me décrire ?"
+                    )
+                else:
+                    question = (
+                        "Bien sûr. En quoi consiste cette offre de la rentrée ?"
+                    )
+            if not brief:
+                brief = "Nouvelle offre — en attente de précisions"
+
+        # Garde-fou inverse : brief de SESSION déjà riche → on peut rédiger
+        brief_l = (brief + " " + hist_l).lower()
         signals = 0
-        for w in ("post", "linkedin", "offre", "essai", "gratuit", "agent", "ia",
-                  "admin", "patron", "jour", "mail", "rdv", "rappel", "clarity"):
+        for w in ("essai", "gratuit", "agent", "ia", "admin", "patron", "jour", "prix"):
             if w in brief_l:
                 signals += 1
-        if len(brief) >= 40 and signals >= 2:
+        if len(brief) >= 40 and signals >= 2 and hist_l.strip():
             has_enough = True
 
         if not has_enough:
