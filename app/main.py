@@ -16,6 +16,7 @@ from app.agents.planning_agent import run_planning_agent
 from app.agents.relance_agent import run_relance_agent
 from app.agents.assistant_agent import run_assistant_agent
 from app.agents.redaction_agent import run_redaction_agent
+from app.writing_styles import list_styles, create_style
 
 app = FastAPI(
     title="Clarity Backend",
@@ -64,6 +65,8 @@ class AgentPayload(BaseModel):
     form_answers: Optional[dict] = None
     answers: Optional[dict] = None
     original_instruction: Optional[str] = None
+    style_key: Optional[str] = None
+    style_id: Optional[str] = None
 
 
 @app.get("/")
@@ -178,3 +181,29 @@ async def webhook_relance(payload: AgentPayload):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+class StyleCreatePayload(BaseModel):
+    user_id: str
+    label: str
+    key: Optional[str] = None
+    example_message: Optional[str] = ""
+    opening: Optional[str] = ""
+    closing: Optional[str] = ""
+
+
+@app.get("/styles/{user_id}")
+async def styles_list(user_id: str):
+    try:
+        styles = list_styles(user_id)
+        return {"success": True, "styles": styles}
+    except Exception as e:
+        return {"success": False, "message": str(e), "styles": []}
+
+
+@app.post("/styles")
+async def styles_create(payload: StyleCreatePayload):
+    try:
+        return create_style(payload.user_id, payload.model_dump())
+    except Exception as e:
+        return {"success": False, "message": str(e)}

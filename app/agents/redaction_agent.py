@@ -10,6 +10,7 @@ from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
 from app.memory import load_memory, memory_as_text, extract_and_save_memory
+from app.writing_styles import get_style, style_prompt_block, list_styles
 
 load_dotenv()
 MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -88,14 +89,21 @@ FORMS = {
         "submit_label": "Rédiger le message",
         "help": (
             "Indiquez pour qui et quoi dire.\n"
-            "• Destinataire\n"
+            "• Type de personne : frère, patron, ami… (ou créez-en un)\n"
             "• Ce qu'il faut transmettre\n"
-            "• Ton : pro, simple, chaleureux…"
+            "Le style d'écriture vient de vos réglages / exemples."
         ),
         "fields": [
-            {"id": "destinataire", "label": "Pour qui", "placeholder": "Ex : un client, mon équipe", "required": False},
+            {
+                "id": "style_key",
+                "label": "Type de personne",
+                "placeholder": "frère, ami, patron…",
+                "required": False,
+                "field_type": "style_select",
+            },
+            {"id": "destinataire", "label": "Pour qui (nom)", "placeholder": "Ex : Antoine", "required": False},
             {"id": "contenu", "label": "Quoi dire", "placeholder": "L'essentiel du message", "required": True},
-            {"id": "ton", "label": "Ton", "placeholder": "pro, simple, chaleureux…", "required": False},
+            {"id": "ton", "label": "Ton (optionnel)", "placeholder": "si différent du style", "required": False},
         ],
     },
     "generic": {
@@ -214,13 +222,15 @@ Texte final direct, sans "Voici le message…".
 """
 
 
-async def write_text(instruction: str, history: str, user_name: str, brief: str, memory_text: str = "") -> str:
+async def write_text(instruction: str, history: str, user_name: str, brief: str, memory_text: str = "", style_block: str = "") -> str:
     today = datetime.now().strftime("%d/%m/%Y")
     user_msg = f"Date : {today}\n"
     if user_name:
         user_msg += f"Auteur possible : {user_name}\n"
     if memory_text:
         user_msg += f"\n=== MÉMOIRE (ne l'utilise que si cohérent avec le brief) ===\n{memory_text}\n"
+    if style_block:
+        user_msg += f"\n=== STYLE UTILISATEUR ===\n{style_block}\n"
     if brief:
         user_msg += f"\n=== BRIEF (FAITS AUTORISÉS) ===\n{brief}\n"
     if history:
@@ -292,8 +302,21 @@ async def run_redaction_agent(payload: dict) -> dict:
         ):
             brief = answers_to_brief(form_answers)
             base_instruction = instruction or payload.get("original_instruction") or "Rédige le texte demandé."
+            sk = (
+                form_answers.get("style_key")
+                or payload.get("style_key")
+                or ""
+            ).strip()
+            sid = (payload.get("style_id") or form_answers.get("style_id") or "").strip()
+            style = get_style(user_id, style_key=sk or None, style_id=sid or None) if user_id else None
+            style_block = style_prompt_block(style)
             text_out = await write_text(
-                base_instruction, history, user_name, brief=brief, memory_text=memory_text
+                base_instruction,
+                history,
+                user_name,
+                brief=brief,
+                memory_text=memory_text,
+                style_block=style_block,
             )
             if not text_out:
                 return {
@@ -349,7 +372,13 @@ async def run_redaction_agent(payload: dict) -> dict:
 
         # --- Sinon : formulaire adapté ---
         form_type = detect_form_type(instruction)
-        return form_response(form_type, request_id, instruction=instruction)
+        resp = form_response(form_type, request_id, instruction=instruction)
+        if user_id:
+            try:
+                resp["styles"] = list_styles(user_id)
+            except Exception:
+                resp["styles"] = []
+        return resp
 
     except Exception as e:
         print(f"[Redaction] error: {e}")
