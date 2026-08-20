@@ -24,20 +24,24 @@ def get_client():
 ANALYZE_SYSTEM = """Tu prépares une rédaction pour Clarity (SaaS pro français).
 Réponds UNIQUEMENT en JSON valide.
 
-Objectif : collecter le MINIMUM utile pour un beau texte, SANS inventer.
-Pose au plus UNE question par tour (la plus utile).
+Objectif : rédiger DÈS QUE POSSIBLE, sans inventer, sans harceler l'utilisateur.
 
-has_enough = true dès que tu as de quoi écrire un texte correct et honnête.
-Pour un post / offre, en général SUFFISANT si tu as :
-- le type de texte (post, offre, CR…)
-- le sujet / produit / promesse principale
-Tu n'as PAS besoin de 10 détails. Prix, CTA, emojis = optionnels.
+has_enough = true DÈS QUE tu as :
+- un type de texte (post, offre, message…) OU que c'est implicite
+- ET le sujet principal (produit / offre / annonce) avec au moins UNE promesse
+  ou description (ex: "7 jours gratuits", "agent IA admin pour patrons")
 
-has_enough = false seulement s'il manque le cœur du sujet.
-question = une seule phrase, vouvoiement, claire.
-brief = résumé TRÈS court de ce qui est DÉJÀ acquis (pour affichage UI),
-  ex: "Post LinkedIn · 7 jours gratuits · aide admin patrons"
-  Si rien encore : "Post / offre — en cours de précision"
+Dès que le brief ressemble à :
+"Post LinkedIn · 7 jours gratuits · agent IA qui aide les patrons sur l'admin"
+→ has_enough DOIT être true. N'ajoute PAS de questions sur avantages, CTA,
+ton, emojis, public précis, etc. Ces détails sont OPTIONNELS : le rédacteur
+écrira un bon post avec ce qui est là.
+
+has_enough = false UNIQUEMENT si le sujet est encore vide ou incompréhensible
+(ex: "fais un post" sans aucun thème, "rédige mon offre" sans dire laquelle).
+
+question = une seule phrase, vouvoiement. null si has_enough.
+brief = résumé court de tout ce qui est acquis.
 
 {
   "has_enough": true/false,
@@ -165,6 +169,16 @@ async def run_redaction_agent(payload: dict) -> dict:
         question = (analysis.get("question") or "").strip()
         brief = (analysis.get("brief") or "").strip()
         doc_type = (analysis.get("doc_type") or "").strip()
+
+        # Garde-fou : si le brief est déjà substantiel, on rédige
+        brief_l = (brief + " " + instruction + " " + (history or "")).lower()
+        signals = 0
+        for w in ("post", "linkedin", "offre", "essai", "gratuit", "agent", "ia",
+                  "admin", "patron", "jour", "mail", "rdv", "rappel", "clarity"):
+            if w in brief_l:
+                signals += 1
+        if len(brief) >= 40 and signals >= 2:
+            has_enough = True
 
         if not has_enough:
             if not question:
