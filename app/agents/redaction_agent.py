@@ -139,6 +139,53 @@ def is_rewrite_request(instruction: str) -> bool:
     return any(k in t for k in keys)
 
 
+
+def is_vague_offer_request(instruction: str, history: str) -> bool:
+    """True si demande d'offre/post trop vague et aucun détail dans la session."""
+    inst = (instruction or "").lower()
+    hist = (history or "").lower()
+    session = inst + " " + hist
+
+    vague_triggers = [
+        "nouvelle offre",
+        "nouvel offre",
+        "offre de la rentrée",
+        "offre de rentree",
+        "offre de rentrée",
+        "notre offre",
+        "mon offre",
+        "notre nouvelle offre",
+        "ma nouvelle offre",
+        "lancer une offre",
+        "annonce mon offre",
+        "annonce notre offre",
+    ]
+    if not any(t in inst for t in vague_triggers):
+        # aussi: "post pour mon offre" sans détail
+        if "offre" in inst and len(inst) < 80:
+            pass  # continue check
+        else:
+            return False
+
+    # Détails concrets déjà donnés dans la conversation
+    detail_markers = [
+        "jour gratuit", "jours gratuits", "7 jour", "essai gratuit",
+        "€", "euro", "euros", "%", "mois à", "par mois",
+        "agent ia", "agent d'ia", "administratif", "patrons",
+        "dirig", "prix", "tarif", "abonnement",
+    ]
+    if any(m in session for m in detail_markers):
+        return False
+
+    # Historique avec une vraie description (réponse utilisateur substantielle)
+    if hist and len(hist.strip()) > 120 and any(
+        m in hist for m in ("gratuit", "agent", "€", "jour", "aide", "admin")
+    ):
+        return False
+
+    return True
+
+
 async def run_redaction_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
@@ -152,6 +199,28 @@ async def run_redaction_agent(payload: dict) -> dict:
             "reason": "missing_content",
             "message": "Que souhaitez-vous que je rédige ?",
             "brief": "",
+            "request_id": request_id,
+        }
+
+    # BLOCAGE DUR : offre / rentrée sans détail de session → question obligatoire
+    if is_vague_offer_request(instruction, history) and not is_rewrite_request(instruction):
+        facts = load_memory(payload.get("user_id"))
+        memory_text = memory_as_text(facts)
+        if memory_text:
+            msg = (
+                "Souhaitez-vous que je m'appuie sur l'offre déjà enregistrée dans "
+                "votre espace Clarity, ou s'agit-il d'une offre différente à me décrire ?"
+            )
+            brief = "Nouvelle offre — confirmation requise"
+        else:
+            msg = "Bien sûr. En quoi consiste cette offre (promesse, public, offre concrète) ?"
+            brief = "Nouvelle offre — en attente de précisions"
+        return {
+            "success": False,
+            "reason": "missing_content",
+            "message": msg,
+            "brief": brief,
+            "partial": {"brief": brief},
             "request_id": request_id,
         }
 
