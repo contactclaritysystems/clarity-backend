@@ -58,36 +58,87 @@ def get_supabase() -> Optional[Client]:
     return create_client(url, key)
 
 
+
 def list_styles(user_id: str) -> List[Dict[str, Any]]:
+    """Retourne tous les styles : défauts + personnalisés.
+    Pour une même key, la ligne en BASE gagne toujours.
+    """
     if not user_id:
-        return list(DEFAULT_STYLES)
+        return [
+            {
+                "id": None,
+                "key": s["key"],
+                "label": s["label"],
+                "example_message": s["example_message"],
+                "opening": s.get("opening") or "",
+                "closing": s.get("closing") or "",
+            }
+            for s in DEFAULT_STYLES
+        ]
+
     sb = get_supabase()
-    if not sb:
-        return list(DEFAULT_STYLES)
-    try:
-        res = (
-            sb.table("user_writing_styles")
-            .select("id, key, label, example_message, opening, closing, created_at")
-            .eq("user_id", user_id)
-            .order("label")
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
-            # seed defaults once
-            seed_defaults(user_id)
+    db_by_key = {}
+    if sb:
+        try:
             res = (
                 sb.table("user_writing_styles")
                 .select("id, key, label, example_message, opening, closing, created_at")
                 .eq("user_id", user_id)
-                .order("label")
                 .execute()
             )
-            rows = res.data or []
-        return rows
-    except Exception as e:
-        print(f"[Styles] list error: {e}")
-        return list(DEFAULT_STYLES)
+            for row in res.data or []:
+                k = (row.get("key") or "").strip().lower()
+                if k:
+                    db_by_key[k] = row
+            print(f"[Styles] list user={user_id} db_keys={list(db_by_key.keys())}")
+        except Exception as e:
+            print(f"[Styles] list error: {e}")
+
+    # Seed les keys manquantes (sans écraser)
+    if sb and user_id:
+        missing = [s for s in DEFAULT_STYLES if s["key"] not in db_by_key]
+        if missing:
+            seed_defaults(user_id)
+            try:
+                res = (
+                    sb.table("user_writing_styles")
+                    .select("id, key, label, example_message, opening, closing, created_at")
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+                db_by_key = {}
+                for row in res.data or []:
+                    k = (row.get("key") or "").strip().lower()
+                    if k:
+                        db_by_key[k] = row
+            except Exception as e:
+                print(f"[Styles] list after seed: {e}")
+
+    out = []
+    seen = set()
+    # 1) Défauts, écrasés par DB si présent
+    for s in DEFAULT_STYLES:
+        k = s["key"]
+        if k in db_by_key:
+            out.append(db_by_key[k])
+        else:
+            out.append(
+                {
+                    "id": None,
+                    "key": k,
+                    "label": s["label"],
+                    "example_message": s["example_message"],
+                    "opening": s.get("opening") or "",
+                    "closing": s.get("closing") or "",
+                }
+            )
+        seen.add(k)
+    # 2) Styles custom (cousin, etc.)
+    for k, row in db_by_key.items():
+        if k not in seen:
+            out.append(row)
+    out.sort(key=lambda r: (r.get("label") or r.get("key") or "").lower())
+    return out
 
 
 def seed_defaults(user_id: str) -> None:
@@ -95,9 +146,23 @@ def seed_defaults(user_id: str) -> None:
     if not sb or not user_id:
         return
     now = datetime.utcnow().isoformat() + "Z"
+    try:
+        existing = (
+            sb.table("user_writing_styles")
+            .select("key")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        have = {r["key"] for r in (existing.data or []) if r.get("key")}
+    except Exception as e:
+        print(f"[Styles] seed list: {e}")
+        have = set()
+
     for s in DEFAULT_STYLES:
+        if s["key"] in have:
+            continue  # ne jamais écraser un style déjà modifié
         try:
-            sb.table("user_writing_styles").upsert(
+            sb.table("user_writing_styles").insert(
                 {
                     "user_id": user_id,
                     "key": s["key"],
@@ -106,31 +171,14 @@ def seed_defaults(user_id: str) -> None:
                     "opening": s.get("opening") or "",
                     "closing": s.get("closing") or "",
                     "updated_at": now,
-                },
-                on_conflict="user_id,key",
+                }
             ).execute()
         except Exception as e:
-            print(f"[Styles] seed {s['key']}: {e}")
-            try:
-                sb.table("user_writing_styles").insert(
-                    {
-                        "user_id": user_id,
-                        "key": s["key"],
-                        "label": s["label"],
-                        "example_message": s["example_message"],
-                        "opening": s.get("opening") or "",
-                        "closing": s.get("closing") or "",
-                        "updated_at": now,
-                    }
-                ).execute()
-            except Exception as e2:
-                print(f"[Styles] seed insert fail: {e2}")
+            print(f"[Styles] seed insert {s['key']}: {e}")
 
 
 def create_style(user_id: str, data: dict) -> Dict[str, Any]:
-    """Crée OU met à jour un style.
-    Priorité : id > key > insert nouveau.
-    """
+    """Crée OU met à jour un style. Toujours re-lit la ligne après écriture."""
     sb = get_supabase()
     if not sb or not user_id:
         return {"success": False, "message": "Supabase / user_id manquant"}
@@ -140,10 +188,13 @@ def create_style(user_id: str, data: dict) -> Dict[str, Any]:
         return {"success": False, "message": "Le nom du style est obligatoire"}
 
     style_id = (data.get("id") or data.get("style_id") or "").strip() or None
-    key = (data.get("key") or "").strip()
+    key = (data.get("key") or "").strip().lower()
     if not key:
         import re as _re
         key = _re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:40] or "style"
+    else:
+        import re as _re
+        key = _re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")[:40] or key
 
     fields = {
         "label": label,
@@ -153,74 +204,74 @@ def create_style(user_id: str, data: dict) -> Dict[str, Any]:
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
-    print(f"[Styles] save user_id={user_id} id={style_id} key={key} fields={fields}")
+    print(f"[Styles] SAVE user={user_id} id={style_id} key={key} msg={fields['example_message'][:80]!r}")
 
-    try:
-        # --- UPDATE par id ---
-        if style_id:
-            upd = (
-                sb.table("user_writing_styles")
-                .update(fields)
-                .eq("id", style_id)
-                .eq("user_id", user_id)
-                .execute()
-            )
-            print(f"[Styles] update by id → {upd.data}")
-            if upd.data:
-                return {"success": True, "style": upd.data[0], "updated": True}
+    def fetch_by_id(sid):
+        r = sb.table("user_writing_styles").select("*").eq("id", sid).limit(1).execute()
+        return (r.data or [None])[0]
 
-        # --- UPDATE par key ---
-        existing = (
+    def fetch_by_key(uid, k):
+        r = (
             sb.table("user_writing_styles")
             .select("*")
-            .eq("user_id", user_id)
-            .eq("key", key)
+            .eq("user_id", uid)
+            .eq("key", k)
             .limit(1)
             .execute()
         )
-        print(f"[Styles] existing by key → {existing.data}")
+        return (r.data or [None])[0]
 
-        if existing.data:
-            row_id = existing.data[0].get("id")
-            q = sb.table("user_writing_styles").update(fields).eq("user_id", user_id)
-            if row_id:
-                q = q.eq("id", row_id)
-            else:
-                q = q.eq("key", key)
-            upd = q.execute()
-            print(f"[Styles] update by key → {upd.data}")
-            if upd.data:
-                return {"success": True, "style": upd.data[0], "updated": True}
+    try:
+        # ----- UPDATE par id (le plus fiable) -----
+        if style_id:
+            # Pas de filtre user_id : l'id est unique
+            sb.table("user_writing_styles").update(fields).eq("id", style_id).execute()
+            row = fetch_by_id(style_id)
+            print(f"[Styles] after update by id → {row}")
+            if row and row.get("example_message") == fields["example_message"] and row.get("label") == fields["label"]:
+                return {"success": True, "style": row, "updated": True}
+            # force write via upsert-like: update all text cols again
+            if row:
+                sb.table("user_writing_styles").update(fields).eq("id", style_id).execute()
+                row = fetch_by_id(style_id)
+                if row and row.get("example_message") == fields["example_message"]:
+                    return {"success": True, "style": row, "updated": True}
+                return {
+                    "success": False,
+                    "message": "La base n'a pas enregistré la modification (clé Supabase ?).",
+                    "style": row,
+                    "debug": {"wanted": fields, "got": row},
+                }
 
-            # UPDATE a renvoyé [] → souvent RLS / mauvaise clé service
-            # Tentative delete+insert (même key)
-            try:
-                sb.table("user_writing_styles").delete().eq("user_id", user_id).eq(
-                    "key", key
-                ).execute()
-            except Exception as de:
-                print(f"[Styles] delete before reinsert: {de}")
-            ins_row = {"user_id": user_id, "key": key, **fields}
-            if row_id:
-                ins_row["id"] = row_id
-            ins = sb.table("user_writing_styles").insert(ins_row).execute()
-            print(f"[Styles] reinsert → {ins.data}")
-            if ins.data:
-                return {"success": True, "style": ins.data[0], "updated": True}
+        # ----- UPDATE / INSERT par key -----
+        existing = fetch_by_key(user_id, key)
+        print(f"[Styles] existing by key → {existing}")
+
+        if existing and existing.get("id"):
+            sid = existing["id"]
+            sb.table("user_writing_styles").update(fields).eq("id", sid).execute()
+            row = fetch_by_id(sid)
+            print(f"[Styles] after update by key id={sid} → {row}")
+            if row and row.get("example_message") == fields["example_message"]:
+                return {"success": True, "style": row, "updated": True}
             return {
                 "success": False,
-                "message": "Impossible de modifier le style (vérifiez SUPABASE_KEY = service_role et les policies RLS).",
+                "message": "Update par key non persisté.",
+                "debug": {"wanted": fields, "got": row},
             }
 
-        # --- INSERT ---
+        # ----- INSERT -----
         ins_row = {"user_id": user_id, "key": key, **fields}
         ins = sb.table("user_writing_styles").insert(ins_row).execute()
         print(f"[Styles] insert → {ins.data}")
         if ins.data:
             return {"success": True, "style": ins.data[0], "updated": False}
-        return {"success": False, "message": "Insert sans retour"}
+        row = fetch_by_key(user_id, key)
+        if row:
+            return {"success": True, "style": row, "updated": False}
+        return {"success": False, "message": "Insert échoué"}
     except Exception as e:
-        print(f"[Styles] create/update error: {e}")
+        print(f"[Styles] ERROR {e}")
         import traceback
         traceback.print_exc()
         return {"success": False, "message": str(e)}
