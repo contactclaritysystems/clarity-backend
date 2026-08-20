@@ -1,6 +1,7 @@
 """
 Agent Rédaction Clarity — premium
-Collecte progressive : 1 question à la fois, brief visible, zéro invention.
+1) Demande vague → formulaire simple (champs selon le type)
+2) Réponses du formulaire → rédaction factuelle, sans inventer
 """
 
 import json
@@ -21,123 +22,165 @@ def get_client():
     return OpenAI(api_key=api_key)
 
 
-ANALYZE_SYSTEM = """Tu prépares une rédaction pour Clarity (SaaS pro français).
-Réponds UNIQUEMENT en JSON valide.
+# ---------------------------------------------------------------------------
+# Formulaires selon le type de demande
+# ---------------------------------------------------------------------------
 
-Ordre de priorité des questions (UNE seule par tour) :
-1) Sujet / offre / contenu manquant → demander le fond (ou confirmer la mémoire).
-2) Si le fond est là MAIS pas encore le but ni le format, pour un post / annonce :
-   poser UNE question combinée sur l'objectif + longueur, ex. :
-   "Souhaitez-vous un post court pour les réseaux, et plutôt pour annoncer l'essai
-   gratuit ou pour pousser à s'inscrire ?"
-3) Ensuite has_enough = true.
-
-has_enough = true si tu as le sujet concret ET (pour un post) une indication de
-but ou de format, OU si l'utilisateur a déjà tout précisé d'un coup.
-
-has_enough = false si :
-- offre / sujet encore flou, OU
-- post demandé sans aucun indice de but/longueur (et pas encore posé cette question).
-
-Ne pose JAMAIS de questions sur des avantages marketing inventés.
-
-RÈGLE MÉMOIRE :
-- "nouvelle offre" sans détail → ne pas coller la mémoire comme acquis.
-- Proposer de confirmer l'offre en mémoire OU de décrire la nouvelle.
-
-question = une phrase, vouvoiement. null si has_enough.
-brief = résumé court de ce qui est acquis pour CETTE demande.
-
-{
-  "has_enough": true/false,
-  "question": "null ou une question",
-  "brief": "court",
-  "doc_type": "linkedin|offre|message|compte_rendu|note|autre"
+FORMS = {
+    "offre": {
+        "title": "Votre offre",
+        "submit_label": "Rédiger l'offre",
+        "help": (
+            "Remplissez seulement ce que vous savez.\n"
+            "• Type : essai gratuit, promo, nouveau tarif…\n"
+            "• Avantage : ex. 7 jours gratuits, -20 %\n"
+            "• Date de fin : si vous en avez une\n"
+            "• Pour qui : patrons, artisans, clients…\n"
+            "Laissez vide ce que vous n'avez pas — Clarity n'inventera rien."
+        ),
+        "fields": [
+            {"id": "type_offre", "label": "Type d'offre", "placeholder": "Ex : essai gratuit, promo rentrée", "required": False},
+            {"id": "avantage", "label": "Avantage principal", "placeholder": "Ex : 7 jours gratuits", "required": True},
+            {"id": "prix", "label": "Prix (si besoin)", "placeholder": "Ex : 29 € / mois", "required": False},
+            {"id": "date_fin", "label": "Date de fin", "placeholder": "Ex : 30 septembre", "required": False},
+            {"id": "public", "label": "Pour qui", "placeholder": "Ex : dirigeants, artisans", "required": False},
+            {"id": "longueur", "label": "Longueur", "placeholder": "court ou un peu plus long", "required": False},
+        ],
+    },
+    "post": {
+        "title": "Votre post",
+        "submit_label": "Rédiger le post",
+        "help": (
+            "Dites l'essentiel en mots simples.\n"
+            "• Sujet : de quoi parle le post\n"
+            "• Message clé : la phrase importante\n"
+            "• But : annoncer, donner envie de s'inscrire…\n"
+            "• Longueur : court (réseaux) ou un peu plus long\n"
+            "Pas besoin de tout remplir."
+        ),
+        "fields": [
+            {"id": "sujet", "label": "Sujet", "placeholder": "Ex : offre de rentrée", "required": True},
+            {"id": "message_cle", "label": "Message clé", "placeholder": "Ex : 7 jours gratuits", "required": False},
+            {"id": "but", "label": "But du post", "placeholder": "Ex : annoncer, faire s'inscrire", "required": False},
+            {"id": "longueur", "label": "Longueur", "placeholder": "court ou un peu plus long", "required": False},
+            {"id": "details", "label": "Autres détails", "placeholder": "Optionnel", "required": False},
+        ],
+    },
+    "compte_rendu": {
+        "title": "Compte-rendu",
+        "submit_label": "Rédiger le compte-rendu",
+        "help": (
+            "Notez les points utiles.\n"
+            "• Sujet de la réunion\n"
+            "• Ce qui a été dit / décidé\n"
+            "• Prochaines étapes si vous en avez\n"
+            "Clarity ne rajoutera rien d'inventé."
+        ),
+        "fields": [
+            {"id": "sujet", "label": "Sujet", "placeholder": "Ex : point devis avec Antoine", "required": True},
+            {"id": "points", "label": "Points importants", "placeholder": "Ce qui s'est dit", "required": True},
+            {"id": "decisions", "label": "Décisions", "placeholder": "Optionnel", "required": False},
+            {"id": "suite", "label": "À faire ensuite", "placeholder": "Optionnel", "required": False},
+        ],
+    },
+    "message": {
+        "title": "Votre message",
+        "submit_label": "Rédiger le message",
+        "help": (
+            "Indiquez pour qui et quoi dire.\n"
+            "• Destinataire\n"
+            "• Ce qu'il faut transmettre\n"
+            "• Ton : pro, simple, chaleureux…"
+        ),
+        "fields": [
+            {"id": "destinataire", "label": "Pour qui", "placeholder": "Ex : un client, mon équipe", "required": False},
+            {"id": "contenu", "label": "Quoi dire", "placeholder": "L'essentiel du message", "required": True},
+            {"id": "ton", "label": "Ton", "placeholder": "pro, simple, chaleureux…", "required": False},
+        ],
+    },
+    "generic": {
+        "title": "Rédaction",
+        "submit_label": "Rédiger",
+        "help": (
+            "Décrivez en mots simples ce que vous voulez.\n"
+            "Plus vous précisez, plus le texte sera juste.\n"
+            "Clarity n'invente pas ce que vous n'avez pas écrit."
+        ),
+        "fields": [
+            {"id": "sujet", "label": "Sujet", "placeholder": "De quoi s'agit-il ?", "required": True},
+            {"id": "details", "label": "Détails", "placeholder": "Points à inclure", "required": False},
+            {"id": "ton", "label": "Ton / longueur", "placeholder": "pro, court…", "required": False},
+        ],
+    },
 }
-"""
 
 
-WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
-
-INTERDICTIONS (non négociables) :
-- N'ajoute AUCUN bénéfice non écrit noir sur blanc dans le brief / historique.
-- Phrases INTERDITES si non fournies par l'utilisateur :
-  "simplifier vos processus", "améliorer la collaboration", "analyses en temps réel",
-  "interface intuitive", "gagner en productivité", "transformer votre entreprise",
-  "fonctionnalités avancées", et tout jargon SaaS générique.
-- Si les seuls faits sont "offre de la rentrée" + "7 jours gratuits" (+ éventuellement
-  un produit nommé), le texte ne doit contenir QUE ces éléments.
-
-STYLE :
-- Court (3–6 lignes pour un post).
-- Concret, humain, pro.
-- Vouvoiement.
-- 0–1 emoji max. 0–2 hashtags liés au sujet.
-- Texte final UNIQUEMENT, sans préambule.
-
-BON exemple (faits: rentrée, 7 jours gratuits, agent admin pour patrons) :
-"Offre de rentrée Clarity : 7 jours gratuits pour tester notre agent qui vous
-aide sur l'administratif au quotidien.
-Sans engagement — voyez par vous-même si vous gagnez du temps.
-#ClaritySystems #Rentrée2026"
-
-MAUVAIS exemple : tout post qui invente collaboration / analytics / transformation.
-"""
+def detect_form_type(instruction: str) -> str:
+    t = (instruction or "").lower()
+    if any(w in t for w in ("compte-rendu", "compte rendu", "cr de", "cr d'", "réunion", "reunion")):
+        return "compte_rendu"
+    if any(w in t for w in ("post", "linkedin", "instagram", "réseaux", "reseaux", "facebook")):
+        return "post"
+    if any(w in t for w in ("offre", "promo", "promotion", "essai gratuit", "rentrée", "rentree")):
+        return "offre"
+    if any(w in t for w in ("message", "sms", "texte pour", "écris à mon", "ecris a mon")):
+        return "message"
+    return "generic"
 
 
-async def analyze_request(instruction: str, history: str, memory_text: str = "") -> dict:
-    user = f"Dernière message de l'utilisateur : {instruction}"
-    if memory_text:
-        user += f"\n\n=== MÉMOIRE BUSINESS ===\n{memory_text}"
-    if history:
-        user += f"\n\n=== HISTORIQUE DE CETTE CONVERSATION ===\n{history}"
-    user += (
-        "\n\nMets à jour le brief avec TOUT ce qui a déjà été dit "
-        "(historique inclus). Une seule question s'il manque encore le cœur."
-    )
-    response = get_client().chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": ANALYZE_SYSTEM},
-            {"role": "user", "content": user},
-        ],
-        temperature=0.15,
-        max_tokens=450,
-        response_format={"type": "json_object"},
-    )
-    return json.loads(response.choices[0].message.content)
+def form_response(form_type: str, request_id, instruction: str = "") -> dict:
+    form = FORMS.get(form_type) or FORMS["generic"]
+    brief = {
+        "offre": "Offre — à compléter",
+        "post": "Post — à compléter",
+        "compte_rendu": "Compte-rendu — à compléter",
+        "message": "Message — à compléter",
+        "generic": "Rédaction — à compléter",
+    }.get(form_type, "Rédaction — à compléter")
+    return {
+        "success": False,
+        "reason": "needs_form",
+        "ui": "form",
+        "form_type": form_type,
+        "title": form["title"],
+        "submit_label": form["submit_label"],
+        "help": form["help"],
+        "fields": form["fields"],
+        "brief": brief,
+        "message": form["title"],
+        "original_instruction": instruction,
+        "request_id": request_id,
+    }
 
 
-async def write_text(
-    instruction: str,
-    history: str,
-    user_name: str,
-    brief: str = "",
-    memory_text: str = "",
-) -> str:
-    today = datetime.now().strftime("%d/%m/%Y")
-    user_msg = f"Date : {today}\n"
-    if user_name:
-        user_msg += f"Auteur possible : {user_name}\n"
-    if memory_text:
-        user_msg += f"\n=== MÉMOIRE BUSINESS ===\n{memory_text}\n"
-    if brief:
-        user_msg += f"\n=== BRIEF ACQUIS ===\n{brief}\n"
-    if history:
-        user_msg += f"\n=== HISTORIQUE ===\n{history}\n"
-    user_msg += f"\n=== DEMANDE ===\n{instruction}\n"
-    user_msg += ("\nRédige le texte final. Rappel: si un bénéfice n'apparaît pas dans le brief ou l'historique, il est INTERDIT dans le texte. Post court, factuel.")
-
-    response = get_client().chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": WRITE_SYSTEM},
-            {"role": "user", "content": user_msg},
-        ],
-        temperature=0.45,
-        max_tokens=1200,
-    )
-    return (response.choices[0].message.content or "").strip()
+def answers_to_brief(answers: dict) -> str:
+    if not answers:
+        return ""
+    labels = {
+        "type_offre": "Type",
+        "avantage": "Avantage",
+        "prix": "Prix",
+        "date_fin": "Date de fin",
+        "public": "Public",
+        "longueur": "Longueur",
+        "sujet": "Sujet",
+        "message_cle": "Message clé",
+        "but": "But",
+        "details": "Détails",
+        "points": "Points",
+        "decisions": "Décisions",
+        "suite": "Suite",
+        "destinataire": "Destinataire",
+        "contenu": "Contenu",
+        "ton": "Ton",
+    }
+    parts = []
+    for k, v in answers.items():
+        v = (v or "").strip()
+        if not v:
+            continue
+        parts.append(f"{labels.get(k, k)} : {v}")
+    return " · ".join(parts)
 
 
 def is_rewrite_request(instruction: str) -> bool:
@@ -150,51 +193,63 @@ def is_rewrite_request(instruction: str) -> bool:
     return any(k in t for k in keys)
 
 
+WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
 
-def is_vague_offer_request(instruction: str, history: str) -> bool:
-    """True si demande d'offre/post trop vague et aucun détail dans la session."""
-    inst = (instruction or "").lower()
-    hist = (history or "").lower()
-    session = inst + " " + hist
+INTERDICTIONS :
+- N'invente AUCUN fait, prix, date, bénéfice non fourni dans le brief.
+- Pas de jargon SaaS générique non demandé
+  (collaboration, analyses temps réel, transformer l'entreprise…).
 
-    vague_triggers = [
-        "nouvelle offre",
-        "nouvel offre",
-        "offre de la rentrée",
-        "offre de rentree",
-        "offre de rentrée",
-        "notre offre",
-        "mon offre",
-        "notre nouvelle offre",
-        "ma nouvelle offre",
-        "lancer une offre",
-        "annonce mon offre",
-        "annonce notre offre",
-    ]
-    if not any(t in inst for t in vague_triggers):
-        # aussi: "post pour mon offre" sans détail
-        if "offre" in inst and len(inst) < 80:
-            pass  # continue check
-        else:
-            return False
+STYLE :
+- Uniquement les faits fournis.
+- Vouvoiement si texte client.
+- Longueur selon la demande (court si indiqué).
+- Texte final direct, sans préambule.
+- 0–1 emoji, 0–2 hashtags max si post.
+"""
 
-    # Détails concrets déjà donnés dans la conversation
-    detail_markers = [
-        "jour gratuit", "jours gratuits", "7 jour", "essai gratuit",
-        "€", "euro", "euros", "%", "mois à", "par mois",
-        "agent ia", "agent d'ia", "administratif", "patrons",
-        "dirig", "prix", "tarif", "abonnement",
-    ]
-    if any(m in session for m in detail_markers):
+
+async def write_text(instruction: str, history: str, user_name: str, brief: str, memory_text: str = "") -> str:
+    today = datetime.now().strftime("%d/%m/%Y")
+    user_msg = f"Date : {today}\n"
+    if user_name:
+        user_msg += f"Auteur possible : {user_name}\n"
+    if memory_text:
+        user_msg += f"\n=== MÉMOIRE (ne l'utilise que si cohérent avec le brief) ===\n{memory_text}\n"
+    if brief:
+        user_msg += f"\n=== BRIEF (FAITS AUTORISÉS) ===\n{brief}\n"
+    if history:
+        user_msg += f"\n=== HISTORIQUE ===\n{history}\n"
+    user_msg += f"\n=== DEMANDE ===\n{instruction}\n"
+    user_msg += "\nRédige le texte. Seulement les faits du brief — rien d'inventé."
+
+    response = get_client().chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": WRITE_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0.4,
+        max_tokens=1200,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+def has_enough_in_instruction(instruction: str) -> bool:
+    """Demande déjà assez riche → pas de formulaire."""
+    t = (instruction or "").lower()
+    if len(t) < 50:
         return False
-
-    # Historique avec une vraie description (réponse utilisateur substantielle)
-    if hist and len(hist.strip()) > 120 and any(
-        m in hist for m in ("gratuit", "agent", "€", "jour", "aide", "admin")
-    ):
-        return False
-
-    return True
+    signals = sum(
+        1
+        for w in (
+            "gratuit", "€", "euro", "jour", "mois", "prix", "essai",
+            "agent", "patron", "admin", "%", "réunion", "reunion",
+            "décision", "decision", "client",
+        )
+        if w in t
+    )
+    return signals >= 2
 
 
 async def run_redaction_agent(payload: dict) -> dict:
@@ -204,7 +259,15 @@ async def run_redaction_agent(payload: dict) -> dict:
     history = payload.get("conversation_history") or ""
     user_id = payload.get("user_id")
 
-    if not instruction:
+    # Réponses du formulaire frontend
+    form_answers = payload.get("form_answers") or payload.get("answers") or {}
+    if isinstance(form_answers, str):
+        try:
+            form_answers = json.loads(form_answers)
+        except Exception:
+            form_answers = {}
+
+    if not instruction and not form_answers:
         return {
             "success": False,
             "reason": "missing_content",
@@ -213,38 +276,42 @@ async def run_redaction_agent(payload: dict) -> dict:
             "request_id": request_id,
         }
 
-    # BLOCAGE DUR : offre / rentrée sans détail de session → question obligatoire
-    if is_vague_offer_request(instruction, history) and not is_rewrite_request(instruction):
-        facts = load_memory(payload.get("user_id"))
-        memory_text = memory_as_text(facts)
-        if memory_text:
-            msg = (
-                "Souhaitez-vous que je m'appuie sur l'offre déjà enregistrée dans "
-                "votre espace Clarity, ou s'agit-il d'une offre différente à me décrire ?"
-            )
-            brief = "Nouvelle offre — confirmation requise"
-        else:
-            msg = "Bien sûr. En quoi consiste cette offre (promesse, public, offre concrète) ?"
-            brief = "Nouvelle offre — en attente de précisions"
-        return {
-            "success": False,
-            "reason": "missing_content",
-            "message": msg,
-            "brief": brief,
-            "partial": {"brief": brief},
-            "request_id": request_id,
-        }
-
     try:
         facts = load_memory(user_id)
         memory_text = memory_as_text(facts)
 
-        if is_rewrite_request(instruction) and history:
+        # --- Formulaire déjà rempli → rédaction ---
+        if form_answers and isinstance(form_answers, dict) and any(
+            (v or "").strip() for v in form_answers.values() if isinstance(v, str)
+        ):
+            brief = answers_to_brief(form_answers)
+            base_instruction = instruction or payload.get("original_instruction") or "Rédige le texte demandé."
             text_out = await write_text(
-                instruction, history, user_name, memory_text=memory_text
+                base_instruction, history, user_name, brief=brief, memory_text=memory_text
             )
             if not text_out:
-                text_out = "Je n'ai pas pu reformuler. Précisez votre demande."
+                return {
+                    "success": False,
+                    "message": "Je n'ai pas pu générer le texte.",
+                    "request_id": request_id,
+                }
+            await extract_and_save_memory(user_id, base_instruction, text_out, history + "\n" + brief)
+            return {
+                "success": True,
+                "title": "Rédaction",
+                "message": text_out,
+                "content": text_out,
+                "brief": brief,
+                "request_id": request_id,
+            }
+
+        # --- Reformulation ---
+        if is_rewrite_request(instruction) and history:
+            text_out = await write_text(
+                instruction, history, user_name, brief="", memory_text=memory_text
+            )
+            if not text_out:
+                text_out = "Je n'ai pas pu reformuler."
             await extract_and_save_memory(user_id, instruction, text_out, history)
             return {
                 "success": True,
@@ -254,100 +321,30 @@ async def run_redaction_agent(payload: dict) -> dict:
                 "request_id": request_id,
             }
 
-        analysis = await analyze_request(instruction, history, memory_text=memory_text)
-        has_enough = bool(analysis.get("has_enough"))
-        question = (analysis.get("question") or "").strip()
-        brief = (analysis.get("brief") or "").strip()
-        doc_type = (analysis.get("doc_type") or "").strip()
-
-        # Garde-fou : ne PAS forcer l'écriture si la demande parle d'une
-        # "nouvelle offre" / "offre de la rentrée" sans détail dans l'historique
-        inst_l = (instruction or "").lower()
-        hist_l = (history or "").lower()
-        vague_new = any(
-            p in inst_l
-            for p in (
-                "nouvelle offre",
-                "nouvel offre",
-                "offre de la rentrée",
-                "offre de rentree",
-                "notre offre",
-                "mon offre",
+        # --- Déjà assez d'infos dans la phrase ---
+        if has_enough_in_instruction(instruction):
+            text_out = await write_text(
+                instruction, history, user_name, brief=instruction, memory_text=memory_text
             )
-        )
-        # détails concrets donnés dans CETTE conversation (pas seulement mémoire)
-        session_detail = any(
-            p in hist_l or p in inst_l
-            for p in (
-                "jour", "gratuit", "€", "euro", "%", "agent", "essai",
-                "prix", "mois", "semaine", "aide", "admin",
-            )
-        )
-        if vague_new and not session_detail and not hist_l.strip():
-            has_enough = False
-            if not question:
-                if memory_text:
-                    question = (
-                        "Souhaitez-vous que je m'appuie sur l'offre déjà enregistrée "
-                        "dans votre espace, ou s'agit-il d'une offre différente à me décrire ?"
-                    )
-                else:
-                    question = (
-                        "Bien sûr. En quoi consiste cette offre de la rentrée ?"
-                    )
-            if not brief:
-                brief = "Nouvelle offre — en attente de précisions"
-
-        # Garde-fou inverse : brief de SESSION déjà riche → on peut rédiger
-        brief_l = (brief + " " + hist_l).lower()
-        signals = 0
-        for w in ("essai", "gratuit", "agent", "ia", "admin", "patron", "jour", "prix"):
-            if w in brief_l:
-                signals += 1
-        if len(brief) >= 40 and signals >= 2 and hist_l.strip():
-            has_enough = True
-
-        if not has_enough:
-            if not question:
-                question = "Bien sûr. De quoi traite exactement ce texte ?"
-            if not brief:
-                brief = "Rédaction — en cours de précision"
+            if not text_out:
+                return {
+                    "success": False,
+                    "message": "Je n'ai pas pu générer le texte.",
+                    "request_id": request_id,
+                }
+            await extract_and_save_memory(user_id, instruction, text_out, history)
             return {
-                "success": False,
-                "reason": "missing_content",
-                "message": question,
-                "brief": brief,
-                "partial": {
-                    "brief": brief,
-                    "doc_type": doc_type or None,
-                },
+                "success": True,
+                "title": "Rédaction",
+                "message": text_out,
+                "content": text_out,
                 "request_id": request_id,
             }
 
-        text_out = await write_text(
-            instruction,
-            history,
-            user_name,
-            brief=brief,
-            memory_text=memory_text,
-        )
-        if not text_out:
-            return {
-                "success": False,
-                "message": "Je n'ai pas pu générer le texte. Reformulez votre demande.",
-                "request_id": request_id,
-            }
+        # --- Sinon : formulaire adapté ---
+        form_type = detect_form_type(instruction)
+        return form_response(form_type, request_id, instruction=instruction)
 
-        await extract_and_save_memory(user_id, instruction, text_out, history)
-
-        return {
-            "success": True,
-            "title": "Rédaction",
-            "message": text_out,
-            "content": text_out,
-            "brief": brief,
-            "request_id": request_id,
-        }
     except Exception as e:
         print(f"[Redaction] error: {e}")
         import traceback
