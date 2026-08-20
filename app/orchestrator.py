@@ -30,8 +30,9 @@ Ton rôle : comprendre EXACTEMENT ce que veut l'utilisateur et décider quel age
 AGENTS DISPONIBLES
 ═══════════════════════════════════════
 - "mail" : tout ce qui concerne un email (envoyer, répondre, relancer, préparer un mail, mettre quelqu'un en copie…)
-- "redaction" : rédiger un contenu long qui n'est PAS un email (post LinkedIn, note, compte-rendu, document, message Slack/Teams non-email…)
-- "assistant" : questions, conseils, explications, idées, résumés, reformulations, calculs, aide générale
+- "redaction" : rédiger un texte, message, post, offre, compte-rendu, note (même si l'utilisateur dit seulement « message » ou « rédige un message »). Ce n'est PAS l'assistant.
+- "assistant" : questions, conseils, explications, idées, résumés, calculs, aide générale
+  (PAS pour « message », « rédige… », « écris un post » → ça c'est redaction)
 - "planning" : CRÉER un rendez-vous / réunion (pas consulter l'agenda)
 - "relance" : CRÉER un rappel ("fais-moi penser", "rappelle-moi") — pas lister les rappels existants
 - Pour CONSULTER agenda / rappels / contacts → "assistant"
@@ -53,7 +54,7 @@ RÈGLES DE ROUTAGE (dans l'ordre)
 1. Si la demande implique d'ENVOYER ou PRÉPARER un email → "mail"
 2. Si c'est CRÉER un rendez-vous / une réunion → "planning"
 3. Si c'est CRÉER un rappel / "fais-moi penser" → "relance"
-4. Si c'est une rédaction de contenu (LinkedIn, CR, note…) → "redaction"
+4. Si c'est rédiger (message, post, offre, CR, note, « message » seul…) → "redaction"
 5. Sinon → "assistant"
 
 ═══════════════════════════════════════
@@ -157,7 +158,7 @@ async def run_orchestrator(payload: dict) -> dict:
             "mail", "email", "e-mail", "envoie", "envoyer", "écris à", "ecris a",
             "contacte", "réponds à", "reponds a", "relance par mail", "mets en copie"
         ]
-        redaction_words = ["linkedin", "compte-rendu", "compte rendu", "rédige un", "redige un", "post"]
+        redaction_words = ["linkedin", "compte-rendu", "compte rendu", "rédige", "redige", "post", "message", "offre", "écris un", "ecris un", "écrire un", "ecrire un", "texte pour", "annonce"]
         planning_create = ["ajoute un rdv", "ajoute un rendez-vous", "planifie", "note un rdv", "prend un rdv", "prends un rdv"]
         relance_create = ["fais-moi penser", "fais moi penser", "rappelle-moi", "rappelle moi", "crée un rappel", "creer un rappel"]
         question_words = ["qu'est-ce", "quest-ce", "quels", "quelles", "ai-je", "est-ce que", "résume", "resume", "combien", "montre", "liste"]
