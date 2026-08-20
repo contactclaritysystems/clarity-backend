@@ -266,6 +266,7 @@ async def run_redaction_agent(payload: dict) -> dict:
             form_answers = json.loads(form_answers)
         except Exception:
             form_answers = {}
+    print(f"[Redaction] form_answers keys={list(form_answers.keys()) if isinstance(form_answers, dict) else type(form_answers)} payload_keys={list(payload.keys())}")
 
     if not instruction and not form_answers:
         return {

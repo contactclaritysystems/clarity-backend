@@ -60,6 +60,10 @@ class AgentPayload(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     conversation_history: Optional[str] = None
+    # Rédaction — formulaire
+    form_answers: Optional[dict] = None
+    answers: Optional[dict] = None
+    original_instruction: Optional[str] = None
 
 
 @app.get("/")
