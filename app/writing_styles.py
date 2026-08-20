@@ -82,7 +82,7 @@ def list_styles(user_id: str) -> List[Dict[str, Any]]:
         try:
             res = (
                 sb.table("user_writing_styles")
-                .select("id, key, label, example_message, opening, closing, created_at")
+                .select("id, key, label, example_message, opening, closing, updated_at")
                 .eq("user_id", user_id)
                 .execute()
             )
@@ -102,7 +102,7 @@ def list_styles(user_id: str) -> List[Dict[str, Any]]:
             try:
                 res = (
                     sb.table("user_writing_styles")
-                    .select("id, key, label, example_message, opening, closing, created_at")
+                    .select("id, key, label, example_message, opening, closing, updated_at")
                     .eq("user_id", user_id)
                     .execute()
                 )
