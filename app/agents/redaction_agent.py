@@ -1,13 +1,11 @@
 """
-Agent Rédaction Clarity — natif Render
-Premium : ne rédige que si les infos suffisent, sinon pose UNE question claire.
-N'invente jamais dates, montants, détails produit, etc.
+Agent Rédaction Clarity — premium
+Collecte progressive : 1 question à la fois, brief visible, zéro invention.
 """
 
 import json
 import os
 from datetime import datetime
-from typing import Optional
 from openai import OpenAI
 from dotenv import load_dotenv
 from app.memory import load_memory, memory_as_text, extract_and_save_memory
@@ -23,76 +21,87 @@ def get_client():
     return OpenAI(api_key=api_key)
 
 
-ANALYZE_SYSTEM = """Tu analyses une demande de RÉDACTION pour Clarity (SaaS pro français).
+ANALYZE_SYSTEM = """Tu prépares une rédaction pour Clarity (SaaS pro français).
 Réponds UNIQUEMENT en JSON valide.
 
-Décide si on a assez d'éléments pour rédiger un texte UTILE et HONNÊTE,
-sans inventer de faits (offre, prix, dates, bénéfices, public cible…).
+Objectif : collecter le MINIMUM utile pour un beau texte, SANS inventer.
+Pose au plus UNE question par tour (la plus utile).
 
-has_enough = true SEULEMENT si la demande + l'historique + la MÉMOIRE BUSINESS
-fournissent le fond nécessaire pour rédiger SANS inventer.
+has_enough = true dès que tu as de quoi écrire un texte correct et honnête.
+Pour un post / offre, en général SUFFISANT si tu as :
+- le type de texte (post, offre, CR…)
+- le sujet / produit / promesse principale
+Tu n'as PAS besoin de 10 détails. Prix, CTA, emojis = optionnels.
 
-has_enough = false si il manque encore des éléments clés
-→ "question" = UNE seule question polie en vouvoiement, ciblée, pour combler LE prochain trou
-  (on en posera d'autres au tour suivant si besoin).
-
-Si la mémoire contient déjà current_offer / product_name, NE PAS redemander
-ce qui est déjà connu, sauf si l'utilisateur parle d'une NOUVELLE offre.
+has_enough = false seulement s'il manque le cœur du sujet.
+question = une seule phrase, vouvoiement, claire.
+brief = résumé TRÈS court de ce qui est DÉJÀ acquis (pour affichage UI),
+  ex: "Post LinkedIn · 7 jours gratuits · aide admin patrons"
+  Si rien encore : "Post / offre — en cours de précision"
 
 {
   "has_enough": true/false,
-  "question": "null ou une question en français, vouvoiement",
-  "doc_type": "linkedin|compte_rendu|message|offre|note|autre",
-  "brief": "résumé de ce qu'on sait déjà"
+  "question": "null ou une question",
+  "brief": "ce qui est déjà compris, court",
+  "doc_type": "linkedin|offre|message|compte_rendu|note|autre"
 }
 """
 
 
-WRITE_SYSTEM = """Tu es le module de rédaction de Clarity Systems (SaaS français ultra-premium).
+WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
 
-RÈGLES STRICTES :
-1. N'invente JAMAIS de faits non fournis (prix, dates, fonctionnalités, noms, chiffres).
-2. VOUVOIEMENT dans les textes adressés à un client, sauf demande contraire.
-3. Donne DIRECTEMENT le texte demandé (pas "Voici un texte…").
-4. Adapte le format (LinkedIn, CR, message, offre, note).
-5. Si l'historique contient une reformulation (plus court, plus pro…),
-   repartir du dernier texte et appliquer uniquement la modification.
-6. Français soigné, ton professionnel, clair, premium.
+RÈGLES :
+1. N'invente JAMAIS de faits non fournis.
+2. Utilise le brief + mémoire + historique.
+3. VOUVOIEMENT dans les textes clients, sauf demande contraire.
+4. Donne DIRECTEMENT le texte (pas d'intro "Voici…").
+5. Format adapté (post, offre, CR, message).
+6. Reformulation : appliquer uniquement la consigne (plus court, plus pro…).
 """
 
 
 async def analyze_request(instruction: str, history: str, memory_text: str = "") -> dict:
-    user = f"Demande : {instruction}"
+    user = f"Dernière message de l'utilisateur : {instruction}"
     if memory_text:
-        user += f"\n\n=== MÉMOIRE BUSINESS (persistante) ===\n{memory_text}"
+        user += f"\n\n=== MÉMOIRE BUSINESS ===\n{memory_text}"
     if history:
-        user += f"\n\nHistorique récent :\n{history}"
+        user += f"\n\n=== HISTORIQUE DE CETTE CONVERSATION ===\n{history}"
+    user += (
+        "\n\nMets à jour le brief avec TOUT ce qui a déjà été dit "
+        "(historique inclus). Une seule question s'il manque encore le cœur."
+    )
     response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {"role": "system", "content": ANALYZE_SYSTEM},
             {"role": "user", "content": user},
         ],
-        temperature=0.1,
-        max_tokens=400,
+        temperature=0.15,
+        max_tokens=450,
         response_format={"type": "json_object"},
     )
     return json.loads(response.choices[0].message.content)
 
 
-async def write_text(instruction: str, history: str, user_name: str, brief: str = "", memory_text: str = "") -> str:
+async def write_text(
+    instruction: str,
+    history: str,
+    user_name: str,
+    brief: str = "",
+    memory_text: str = "",
+) -> str:
     today = datetime.now().strftime("%d/%m/%Y")
-    user_msg = f"Date du jour : {today}\n"
+    user_msg = f"Date : {today}\n"
     if user_name:
         user_msg += f"Auteur possible : {user_name}\n"
     if memory_text:
         user_msg += f"\n=== MÉMOIRE BUSINESS ===\n{memory_text}\n"
     if brief:
-        user_msg += f"Brief déjà connu : {brief}\n"
+        user_msg += f"\n=== BRIEF ACQUIS ===\n{brief}\n"
     if history:
         user_msg += f"\n=== HISTORIQUE ===\n{history}\n"
     user_msg += f"\n=== DEMANDE ===\n{instruction}\n"
-    user_msg += "\nRédige le texte, prêt à copier. N'invente aucun fait manquant."
+    user_msg += "\nRédige le texte final, prêt à copier."
 
     response = get_client().chat.completions.create(
         model=MODEL,
@@ -121,23 +130,25 @@ async def run_redaction_agent(payload: dict) -> dict:
     request_id = payload.get("request_id")
     user_name = (payload.get("user_name") or "").strip()
     history = payload.get("conversation_history") or ""
+    user_id = payload.get("user_id")
 
     if not instruction:
         return {
             "success": False,
             "reason": "missing_content",
             "message": "Que souhaitez-vous que je rédige ?",
+            "brief": "",
             "request_id": request_id,
         }
 
     try:
-        user_id = payload.get("user_id")
         facts = load_memory(user_id)
         memory_text = memory_as_text(facts)
 
-        # Reformulation sur un texte déjà produit → on rédige directement
         if is_rewrite_request(instruction) and history:
-            text_out = await write_text(instruction, history, user_name, memory_text=memory_text)
+            text_out = await write_text(
+                instruction, history, user_name, memory_text=memory_text
+            )
             if not text_out:
                 text_out = "Je n'ai pas pu reformuler. Précisez votre demande."
             await extract_and_save_memory(user_id, instruction, text_out, history)
@@ -153,22 +164,31 @@ async def run_redaction_agent(payload: dict) -> dict:
         has_enough = bool(analysis.get("has_enough"))
         question = (analysis.get("question") or "").strip()
         brief = (analysis.get("brief") or "").strip()
+        doc_type = (analysis.get("doc_type") or "").strip()
 
         if not has_enough:
             if not question:
-                question = (
-                    "Bien sûr. Pouvez-vous me préciser le sujet et les points "
-                    "essentiels à inclure ?"
-                )
+                question = "Bien sûr. De quoi traite exactement ce texte ?"
+            if not brief:
+                brief = "Rédaction — en cours de précision"
             return {
                 "success": False,
                 "reason": "missing_content",
                 "message": question,
+                "brief": brief,
+                "partial": {
+                    "brief": brief,
+                    "doc_type": doc_type or None,
+                },
                 "request_id": request_id,
             }
 
         text_out = await write_text(
-            instruction, history, user_name, brief=brief, memory_text=memory_text
+            instruction,
+            history,
+            user_name,
+            brief=brief,
+            memory_text=memory_text,
         )
         if not text_out:
             return {
@@ -184,6 +204,7 @@ async def run_redaction_agent(payload: dict) -> dict:
             "title": "Rédaction",
             "message": text_out,
             "content": text_out,
+            "brief": brief,
             "request_id": request_id,
         }
     except Exception as e:
