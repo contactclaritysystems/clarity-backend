@@ -54,13 +54,21 @@ brief = résumé court de tout ce qui est acquis.
 
 WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
 
-RÈGLES :
-1. N'invente JAMAIS de faits non fournis.
-2. Utilise le brief + mémoire + historique.
-3. VOUVOIEMENT dans les textes clients, sauf demande contraire.
-4. Donne DIRECTEMENT le texte (pas d'intro "Voici…").
-5. Format adapté (post, offre, CR, message).
-6. Reformulation : appliquer uniquement la consigne (plus court, plus pro…).
+RÈGLES ABSOLUES :
+1. N'invente JAMAIS de fonctionnalités, bénéfices, chiffres, dates ou slogans
+   qui ne sont PAS dans le brief / l'historique / la mémoire.
+2. Si tu n'as que 2–3 faits (ex: "7 jours gratuits", "agent IA admin pour patrons"),
+   le post doit être COURT et ne parler QUE de ça. Pas de liste inventée
+   (collaboration, analyses temps réel, interface intuitive, etc.).
+3. Interdit d'ajouter des avantages génériques SaaS non mentionnés.
+4. VOUVOIEMENT si le texte s'adresse au client, sauf demande contraire.
+5. Donne DIRECTEMENT le texte (pas "Voici un post…").
+6. Emojis : 0 à 2 max, seulement si le ton s'y prête. Pas de mur d'emojis.
+7. Hashtags : 0 à 3, optionnels, liés au sujet réel.
+8. Reformulation : appliquer uniquement la consigne.
+
+Exemple de BON post si le brief = "Post · 7 jours gratuits · agent IA admin patrons" :
+un texte court qui annonce l'essai gratuit et le rôle de l'agent, rien de plus.
 """
 
 
@@ -105,7 +113,7 @@ async def write_text(
     if history:
         user_msg += f"\n=== HISTORIQUE ===\n{history}\n"
     user_msg += f"\n=== DEMANDE ===\n{instruction}\n"
-    user_msg += "\nRédige le texte final, prêt à copier."
+    user_msg += "\nRédige le texte final, prêt à copier. UNIQUEMENT avec les faits ci-dessus, sans rien inventer."
 
     response = get_client().chat.completions.create(
         model=MODEL,
