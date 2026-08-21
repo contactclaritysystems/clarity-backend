@@ -51,20 +51,21 @@ def update_progress(request_id: Optional[str], status: str, message: str = ""):
 
 
 INTENT_SYSTEM = """Tu es le module d'analyse de Clarity Systems.
-Extrais les infos de la dictée. Réponds UNIQUEMENT en JSON.
+Extrais les infos de la dictée pour préparer un MESSAGE / MAIL. Réponds UNIQUEMENT en JSON.
 
-Règle CRITIQUE pour has_enough_content :
-- true UNIQUEMENT s'il y a un vrai message à transmettre (ex: "dis-lui que je serai en retard", "remercie-le")
-- false si la demande est juste "envoie un mail à X" sans contenu
-- Détecte aussi les copies : "mets Paul en copie" → cc_names
+Règles has_enough_content :
+- true s'il y a QUELQUE CHOSE à transmettre : "dit-lui rdv demain 8h", "dis-lui que je serai en retard", "préviens-le que...", "message pour X : ..."
+- false UNIQUEMENT si la demande est vide de contenu : "envoie un mail à Antoine" sans autre info
+- "écrit un message pour Anthony, dit lui rdv demain 8h" → to_names: ["Anthony"], has_enough_content: true, content_summary: "RDV demain à 8h"
+- Détecte les copies : "mets Paul en copie" → cc_names
 
 {
   "to_names": ["prénom"],
-  "cc_names": ["prénom"],
+  "cc_names": [],
   "relationship": null,
-  "tone": "professionnel",
+  "tone": null,
   "has_enough_content": true,
-  "content_summary": "résumé",
+  "content_summary": "résumé du message à envoyer",
   "raw_instruction": "demande originale"
 }
 """
@@ -90,7 +91,7 @@ def search_contacts(name: str, user_id: Optional[str] = None) -> List[dict]:
         return []
     try:
         name_clean = name.strip()
-        query = sb.table("contacts").select("id, full_name, email, company")
+        query = sb.table("contacts").select("id, full_name, email, company, writing_style_key")
         if user_id:
             query = query.eq("user_id", user_id)
         query = query.ilike("full_name", f"%{name_clean}%")
@@ -261,14 +262,17 @@ async def run_mail_agent(payload: dict) -> dict:
         update_progress(request_id, "generating_mail", contact_label)
 
         style_block = ""
-        style_key = None
-        if main_contact:
-            style_key = (main_contact.get("writing_style_key") or "").strip() or None
+        style_key = (
+            (payload.get("style_key") or payload.get("writing_style_key") or "")
+            or (main_contact.get("writing_style_key") if main_contact else "")
+            or ""
+        ).strip() or None
         if style_key and user_id:
             style = get_style(user_id, style_key=style_key)
             style_block = style_prompt_block(style)
-            if style_block:
-                print(f"[Mail] style key={style_key} applied")
+            print(f"[Mail] style key={style_key} loaded={bool(style)} block_len={len(style_block)}")
+        else:
+            print(f"[Mail] no style_key contact={bool(main_contact)} user={user_id}")
 
         email = await write_email(
             content_summary=content_summary,
