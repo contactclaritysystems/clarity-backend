@@ -299,36 +299,28 @@ def get_style(user_id: str, style_key: str = None, style_id: str = None) -> Opti
 
 
 def style_prompt_block(style: Optional[dict]) -> str:
-    """Ton / ouverture / fin = UNIQUEMENT example_message."""
+    """Mirror example_message fully: language, register, openings, closings."""
     if not style:
         return ""
     label = style.get("label") or style.get("key") or "style"
     example = (style.get("example_message") or "").strip()
-    lines = [
-        "STYLE D'ECRITURE OBLIGATOIRE a respecter a 100% : " + label,
-    ]
-    if example:
-        lines.append("EXEMPLE DE REFERENCE (modele de ton, ouverture et fin) :")
-        lines.append("« " + example + " »")
-        low = " " + example.lower() + " "
-        if any(w in low for w in [" vous ", " votre ", " vos ", " seriez", " pouvez", " souhait"]):
-            lines.append("VOUVOIEMENT obligatoire (vous/votre). INTERDIT: tu, te, ton, ta, tes.")
-        if any(w in low for w in [" tu ", " t'", " te ", " ton ", " ta ", " tes ", " salut"]):
-            lines.append("TUTOIEMENT obligatoire (tu/te/ton). INTERDIT: vous, votre (sauf nom de societe).")
-        if "salut" in low:
-            lines.append("Ouverture casual: commence par Salut (pas Bonjour).")
-        if "bonjour" in low and "salut" not in low:
-            lines.append("Ouverture formelle: commence par Bonjour.")
-        if any(x in low for x in ["mec", "a plus", "à plus", "a+", "bisous", "ciao"]):
-            lines.append("Fin casual (A plus / equivalent). INTERDIT: Cordialement.")
-        if any(x in low for x in ["cordialement", "bien a vous", "bien à vous", "respectueusement"]):
-            lines.append("Fin formelle (Cordialement).")
-        lines.append(
-            "Reproduis le NIVEAU de langage de l'exemple (familier vs soutenu). "
-            "Ne copie pas le sujet de l'exemple, seulement le style."
-        )
-    lines.append("Aucun contenu invente hors de la demande.")
-    return "\n".join(lines)
+    if not example:
+        return "Style choisi : %s (pas d'exemple fourni)." % label
+    return (
+        "=== STYLE D'ECRITURE A REPRODUIRE A L'IDENTIQUE (PRIORITE ABSOLUE) ===\n"
+        "Nom du style : " + label + "\n"
+        "Exemple ecrit par l'utilisateur (MODELE UNIQUE) :\n"
+        "« " + example + " »\n\n"
+        "Tu DOIS rediger le message dans EXACTEMENT le meme style que cet exemple :\n"
+        "- MEME LANGUE (exemple en anglais → tout le message en anglais ; "
+        "francais → francais ; toute autre langue → cette langue)\n"
+        "- meme tutoiement ou vouvoiement (ou equivalent dans la langue)\n"
+        "- meme niveau de formalite / familiarite (salutations, formules de fin, vocabulaire)\n"
+        "- meme longueur relative et meme energie\n"
+        "Ne copie PAS le sujet de l'exemple : uniquement la maniere d'ecrire.\n"
+        "Aucune regle generique (professionnel, Cordialement, Bonjour, etc.) "
+        "ne doit contredire cet exemple."
+    )
 
 
 

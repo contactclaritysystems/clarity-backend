@@ -148,15 +148,16 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
             WRITE_SYSTEM
             + "\n\n=== STYLE UTILISATEUR (PRIORITE ABSOLUE SUR TOUT LE RESTE) ===\n"
             + style_block
-            + "\nSi le style vouvoie, INTERDIT d'ecrire tu/te/ton/ta. "
-            "Si le style tutoie, n'utilise pas vous/votre. "
-            "Formule d'ouverture ET de fin coherentes avec le style: si l'exemple dit Salut/mec/A plus → utilise Salut et une fin casual, INTERDIT Bonjour+Cordialement. Si l'exemple dit Bonjour/Cordialement → ouverture et fin formelles."
+            + "\nLe STYLE ci-dessus est la seule source de verite : langue, ton, "
+            "salutations, formules de fin. "
+            "Si l'exemple est en anglais, le mail ENTIER doit etre en anglais. "
+            "N'impose jamais Bonjour/Cordialement si l'exemple ne les utilise pas."
         )
     parts = [
         f"Tu ecris ce mail AU NOM de : {user_name}",
         f"Contenu a transmettre (ne rien inventer) : {content_summary}",
         f"Destinataire : {to_name or 'le destinataire'}",
-        "Ecris a la 1re personne (je/moi).",
+        "Ecris a la 1re personne (je/moi ou I/me selon la langue du style).",
         f"Signature obligatoire : {user_name}",
     ]
     if relationship and not style_block:
