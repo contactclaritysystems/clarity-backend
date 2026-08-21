@@ -152,12 +152,17 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
     if style_block:
         parts.append(style_block)
         parts.append(
-            "Applique ce style d'écriture (tutoiement/vouvoiement, familiarité) "
-            "en priorité sur relation/ton génériques, sans inventer de faits."
+            "=== RÈGLE STYLE OBLIGATOIRE === "
+            "1) Si l'exemple vouvoie (vous/votre) le mail DOIT vouvoyer. "
+            "Si l'exemple tutoie (tu/ton) le mail DOIT tutoyer. "
+            "2) Même formalité (Bonjour vs Salut, Cordialement vs À plus). "
+            "3) INTERDIT de tutoyer si l'exemple vouvoie. "
+            "4) Ignore tout ton générique qui contredit l'exemple. "
+            "5) N'invente aucun fait hors contenu fourni."
         )
-    if relationship:
+    elif relationship:
         parts.append(f"Relation : {relationship}")
-    if tone:
+    if tone and not style_block:
         parts.append(f"Ton : {tone}")
 
     response = get_client().chat.completions.create(
