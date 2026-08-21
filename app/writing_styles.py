@@ -305,19 +305,29 @@ def style_prompt_block(style: Optional[dict]) -> str:
     label = style.get("label") or style.get("key") or "style"
     example = (style.get("example_message") or "").strip()
     lines = [
-        "STYLE D'ÉCRITURE OBLIGATOIRE : " + label,
+        "STYLE D'ECRITURE OBLIGATOIRE a respecter a 100% : " + label,
     ]
     if example:
-        lines.append("Exemple de référence (à imiter pour le TON uniquement) :")
+        lines.append("EXEMPLE DE REFERENCE (modele de ton, ouverture et fin) :")
         lines.append("« " + example + " »")
-        # detect vous vs tu roughly for explicit instruction
-        low = example.lower()
-        if any(w in low for w in ["vous", "votre", "vos", "seriez", "pouvez", "souhaitez"]):
-            lines.append("Cet exemple VOUVOIE. Le message DOIT vouvoyer (vous/votre). INTERDIT de tutoyer.")
-        elif any(w in low for w in [" tu ", " t'", "ton ", "ta ", "tes ", "salut"]):
-            lines.append("Cet exemple TUTOIE. Le message DOIT tutoyer (tu/ton).")
-        lines.append("Reprendre le même niveau de formalité (Bonjour vs Salut, Cordialement vs À plus).")
-    lines.append("N'invente aucun contenu : seulement le ton de l'exemple.")
+        low = " " + example.lower() + " "
+        if any(w in low for w in [" vous ", " votre ", " vos ", " seriez", " pouvez", " souhait"]):
+            lines.append("VOUVOIEMENT obligatoire (vous/votre). INTERDIT: tu, te, ton, ta, tes.")
+        if any(w in low for w in [" tu ", " t'", " te ", " ton ", " ta ", " tes ", " salut"]):
+            lines.append("TUTOIEMENT obligatoire (tu/te/ton). INTERDIT: vous, votre (sauf nom de societe).")
+        if "salut" in low:
+            lines.append("Ouverture casual: commence par Salut (pas Bonjour).")
+        if "bonjour" in low and "salut" not in low:
+            lines.append("Ouverture formelle: commence par Bonjour.")
+        if any(x in low for x in ["mec", "a plus", "à plus", "a+", "bisous", "ciao"]):
+            lines.append("Fin casual (A plus / equivalent). INTERDIT: Cordialement.")
+        if any(x in low for x in ["cordialement", "bien a vous", "bien à vous", "respectueusement"]):
+            lines.append("Fin formelle (Cordialement).")
+        lines.append(
+            "Reproduis le NIVEAU de langage de l'exemple (familier vs soutenu). "
+            "Ne copie pas le sujet de l'exemple, seulement le style."
+        )
+    lines.append("Aucun contenu invente hors de la demande.")
     return "\n".join(lines)
 
 

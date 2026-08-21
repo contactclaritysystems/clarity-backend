@@ -150,7 +150,7 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
             + style_block
             + "\nSi le style vouvoie, INTERDIT d'ecrire tu/te/ton/ta. "
             "Si le style tutoie, n'utilise pas vous/votre. "
-            "Formule de politesse coherente avec le style (pas 'A plus' pour un style patron)."
+            "Formule d'ouverture ET de fin coherentes avec le style: si l'exemple dit Salut/mec/A plus → utilise Salut et une fin casual, INTERDIT Bonjour+Cordialement. Si l'exemple dit Bonjour/Cordialement → ouverture et fin formelles."
         )
     parts = [
         f"Tu ecris ce mail AU NOM de : {user_name}",
