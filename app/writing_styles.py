@@ -299,17 +299,23 @@ def get_style(user_id: str, style_key: str = None, style_id: str = None) -> Opti
 
 
 def style_prompt_block(style: Optional[dict]) -> str:
+    """Ton / ouverture / fin = UNIQUEMENT example_message."""
     if not style:
         return ""
-    parts = [f"Style d'écriture choisi : {style.get('label') or style.get('key')}"]
-    if style.get("example_message"):
-        parts.append(f"Exemple type de l'utilisateur : « {style['example_message']} »")
-    if style.get("opening"):
-        parts.append(f"Il commence souvent par : « {style['opening']} »")
-    if style.get("closing"):
-        parts.append(f"Il termine souvent par : « {style['closing']} »")
+    label = style.get("label") or style.get("key") or "style"
+    example = (style.get("example_message") or "").strip()
+    parts = ["Style d'écriture choisi : %s" % label]
+    if example:
+        parts.append(
+            "Exemple type écrit par l'utilisateur (modèle unique à imiter) :\n« %s »" % example
+        )
+        parts.append(
+            "Déduis de CET exemple seul : tutoiement ou vouvoiement, façon de "
+            "commencer, de finir, longueur et familiarité. "
+            "Ignore d'éventuels anciens champs opening/closing en base."
+        )
     parts.append(
-        "Imite CE style (tutoiement/vouvoiement, longueur, familiarité) "
-        "sans copier l'exemple mot à mot, et sans inventer de contenu."
+        "Imite ce style sans copier l'exemple mot à mot, et sans inventer de contenu."
     )
     return "\n".join(parts)
+
