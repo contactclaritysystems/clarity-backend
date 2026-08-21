@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Any
 from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from app.writing_styles import get_style, style_prompt_block
 
 load_dotenv()
 
@@ -138,7 +139,8 @@ Exemple de body :
 
 
 async def write_email(content_summary: str, user_name: str, to_name: str = "",
-                      relationship: Optional[str] = None, tone: Optional[str] = None) -> dict:
+                      relationship: Optional[str] = None, tone: Optional[str] = None,
+                      style_block: str = "") -> dict:
     parts = [
         f"Tu écris ce mail AU NOM de : {user_name}",
         f"Contenu : {content_summary}",
@@ -146,6 +148,12 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
         "Écris à la 1re personne (je/moi).",
         f"Signature obligatoire : {user_name}",
     ]
+    if style_block:
+        parts.append(style_block)
+        parts.append(
+            "Applique ce style d'écriture (tutoiement/vouvoiement, familiarité) "
+            "en priorité sur relation/ton génériques, sans inventer de faits."
+        )
     if relationship:
         parts.append(f"Relation : {relationship}")
     if tone:
@@ -192,7 +200,7 @@ async def run_mail_agent(payload: dict) -> dict:
             sb = get_supabase()
             if sb:
                 try:
-                    res = sb.table("contacts").select("id, full_name, email").eq("id", contact_id).limit(1).execute()
+                    res = sb.table("contacts").select("id, full_name, email, writing_style_key").eq("id", contact_id).limit(1).execute()
                     if res.data:
                         resolved_to = [res.data[0]]
                 except Exception:
@@ -252,12 +260,23 @@ async def run_mail_agent(payload: dict) -> dict:
 
         update_progress(request_id, "generating_mail", contact_label)
 
+        style_block = ""
+        style_key = None
+        if main_contact:
+            style_key = (main_contact.get("writing_style_key") or "").strip() or None
+        if style_key and user_id:
+            style = get_style(user_id, style_key=style_key)
+            style_block = style_prompt_block(style)
+            if style_block:
+                print(f"[Mail] style key={style_key} applied")
+
         email = await write_email(
             content_summary=content_summary,
             user_name=user_name,
             to_name=to_name,
             relationship=relationship,
-            tone=tone
+            tone=tone,
+            style_block=style_block,
         )
 
         body = email.get("body") or ""
