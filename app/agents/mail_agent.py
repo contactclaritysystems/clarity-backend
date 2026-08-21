@@ -142,25 +142,24 @@ Exemple de body :
 async def write_email(content_summary: str, user_name: str, to_name: str = "",
                       relationship: Optional[str] = None, tone: Optional[str] = None,
                       style_block: str = "") -> dict:
+    system = WRITE_SYSTEM
+    if style_block:
+        system = (
+            WRITE_SYSTEM
+            + "\n\n=== STYLE UTILISATEUR (PRIORITE ABSOLUE SUR TOUT LE RESTE) ===\n"
+            + style_block
+            + "\nSi le style vouvoie, INTERDIT d'ecrire tu/te/ton/ta. "
+            "Si le style tutoie, n'utilise pas vous/votre. "
+            "Formule de politesse coherente avec le style (pas 'A plus' pour un style patron)."
+        )
     parts = [
-        f"Tu écris ce mail AU NOM de : {user_name}",
-        f"Contenu : {content_summary}",
+        f"Tu ecris ce mail AU NOM de : {user_name}",
+        f"Contenu a transmettre (ne rien inventer) : {content_summary}",
         f"Destinataire : {to_name or 'le destinataire'}",
-        "Écris à la 1re personne (je/moi).",
+        "Ecris a la 1re personne (je/moi).",
         f"Signature obligatoire : {user_name}",
     ]
-    if style_block:
-        parts.append(style_block)
-        parts.append(
-            "=== RÈGLE STYLE OBLIGATOIRE === "
-            "1) Si l'exemple vouvoie (vous/votre) le mail DOIT vouvoyer. "
-            "Si l'exemple tutoie (tu/ton) le mail DOIT tutoyer. "
-            "2) Même formalité (Bonjour vs Salut, Cordialement vs À plus). "
-            "3) INTERDIT de tutoyer si l'exemple vouvoie. "
-            "4) Ignore tout ton générique qui contredit l'exemple. "
-            "5) N'invente aucun fait hors contenu fourni."
-        )
-    elif relationship:
+    if relationship and not style_block:
         parts.append(f"Relation : {relationship}")
     if tone and not style_block:
         parts.append(f"Ton : {tone}")
@@ -168,10 +167,10 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
     response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": WRITE_SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": "\n".join(parts)}
         ],
-        temperature=0.4,
+        temperature=0.2 if style_block else 0.4,
         max_tokens=700,
         response_format={"type": "json_object"}
     )
@@ -232,6 +231,22 @@ async def run_mail_agent(payload: dict) -> dict:
             }
 
         main_contact = resolved_to[0] if resolved_to else {}
+        # Recharge le contact pour writing_style_key a jour
+        if main_contact.get("id") and get_supabase():
+            try:
+                fr = (
+                    get_supabase()
+                    .table("contacts")
+                    .select("id, full_name, email, writing_style_key")
+                    .eq("id", main_contact["id"])
+                    .limit(1)
+                    .execute()
+                )
+                if fr.data:
+                    main_contact = fr.data[0]
+                    print(f"[Mail] contact reload style={main_contact.get('writing_style_key')}")
+            except Exception as e:
+                print(f"[Mail] contact reload err: {e}")
         contact_label = main_contact.get("full_name") or (to_names[0] if to_names else "")
         update_progress(request_id, "contact_found", contact_label)
 

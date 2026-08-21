@@ -304,18 +304,22 @@ def style_prompt_block(style: Optional[dict]) -> str:
         return ""
     label = style.get("label") or style.get("key") or "style"
     example = (style.get("example_message") or "").strip()
-    parts = ["Style d'écriture choisi : %s" % label]
+    lines = [
+        "STYLE D'ÉCRITURE OBLIGATOIRE : " + label,
+    ]
     if example:
-        parts.append(
-            "Exemple type écrit par l'utilisateur (modèle unique à imiter) :\n« %s »" % example
-        )
-        parts.append(
-            "Déduis de CET exemple seul : tutoiement ou vouvoiement, façon de "
-            "commencer, de finir, longueur et familiarité. "
-            "Ignore d'éventuels anciens champs opening/closing en base."
-        )
-    parts.append(
-        "Imite ce style sans copier l'exemple mot à mot, et sans inventer de contenu."
-    )
-    return "\n".join(parts)
+        lines.append("Exemple de référence (à imiter pour le TON uniquement) :")
+        lines.append("« " + example + " »")
+        # detect vous vs tu roughly for explicit instruction
+        low = example.lower()
+        if any(w in low for w in ["vous", "votre", "vos", "seriez", "pouvez", "souhaitez"]):
+            lines.append("Cet exemple VOUVOIE. Le message DOIT vouvoyer (vous/votre). INTERDIT de tutoyer.")
+        elif any(w in low for w in [" tu ", " t'", "ton ", "ta ", "tes ", "salut"]):
+            lines.append("Cet exemple TUTOIE. Le message DOIT tutoyer (tu/ton).")
+        lines.append("Reprendre le même niveau de formalité (Bonjour vs Salut, Cordialement vs À plus).")
+    lines.append("N'invente aucun contenu : seulement le ton de l'exemple.")
+    return "\n".join(lines)
+
+
+
 
