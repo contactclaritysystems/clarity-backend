@@ -148,14 +148,17 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
             WRITE_SYSTEM
             + "\n\n=== STYLE UTILISATEUR (PRIORITE ABSOLUE SUR TOUT LE RESTE) ===\n"
             + style_block
-            + "\nLe STYLE ci-dessus est la seule source de verite : langue, ton, "
-            "salutations, formules de fin. "
-            "Si l'exemple est en anglais, le mail ENTIER doit etre en anglais. "
-            "N'impose jamais Bonjour/Cordialement si l'exemple ne les utilise pas."
+            + "\nLe STYLE est la seule source de verite (langue, ton, formules). "
+            "Si l'exemple est en anglais, tout le mail en anglais. "
+            "N'impose jamais Bonjour/Cordialement si l'exemple ne les utilise pas. "
+            "CRITIQUE : le contenu fourni peut etre en tutoiement. "
+            "Tu DOIS le REFORMULER pour coller au style "
+            "(ex: 'peux-tu passer' → 'pourriez-vous passer' si le style vouvoie), "
+            "sans changer le sens."
         )
     parts = [
         f"Tu ecris ce mail AU NOM de : {user_name}",
-        f"Contenu a transmettre (ne rien inventer) : {content_summary}",
+        f"Contenu a transmettre (reformule selon le STYLE si besoin, ne rien inventer) : {content_summary}",
         f"Destinataire : {to_name or 'le destinataire'}",
         "Ecris a la 1re personne (je/moi ou I/me selon la langue du style).",
         f"Signature obligatoire : {user_name}",
@@ -283,24 +286,71 @@ async def run_mail_agent(payload: dict) -> dict:
         update_progress(request_id, "generating_mail", contact_label)
 
         style_block = ""
+        # Toujours relire le contact juste avant le style (evite cache / ancienne key)
+        if main_contact.get("id"):
+            try:
+                sb = get_supabase()
+                if sb:
+                    fr = (
+                        sb.table("contacts")
+                        .select("id, full_name, email, writing_style_key")
+                        .eq("id", main_contact["id"])
+                        .limit(1)
+                        .execute()
+                    )
+                    if fr.data:
+                        main_contact = {**main_contact, **fr.data[0]}
+            except Exception as e:
+                print(f"[Mail] style refresh contact err: {e}")
+
         style_key = (
             (payload.get("style_key") or payload.get("writing_style_key") or "")
             or (main_contact.get("writing_style_key") if main_contact else "")
             or ""
-        ).strip() or None
+        )
+        if isinstance(style_key, str):
+            style_key = style_key.strip().lower() or None
+        else:
+            style_key = None
+
+        style = None
         if style_key and user_id:
             style = get_style(user_id, style_key=style_key)
+            if not style:
+                # retry sans filtre strict (au cas ou key differente casse)
+                try:
+                    sb = get_supabase()
+                    if sb:
+                        r = (
+                            sb.table("user_writing_styles")
+                            .select("*")
+                            .eq("user_id", user_id)
+                            .ilike("key", style_key)
+                            .limit(1)
+                            .execute()
+                        )
+                        style = (r.data or [None])[0]
+                except Exception as e:
+                    print(f"[Mail] style ilike err: {e}")
             style_block = style_prompt_block(style)
-            print(f"[Mail] style key={style_key} loaded={bool(style)} block_len={len(style_block)}")
+            ex = (style or {}).get("example_message") or ""
+            print(
+                f"[Mail] style key={style_key} loaded={bool(style)} "
+                f"ex={ex[:60]!r} block_len={len(style_block)}"
+            )
         else:
-            print(f"[Mail] no style_key contact={bool(main_contact)} user={user_id}")
+            print(
+                f"[Mail] no style_key contact_id={main_contact.get('id')} "
+                f"raw={main_contact.get('writing_style_key')!r} user={user_id}"
+            )
 
+        # Si un style contact est present, il ecrase ton/relation de l'intent
         email = await write_email(
             content_summary=content_summary,
             user_name=user_name,
             to_name=to_name,
-            relationship=relationship,
-            tone=tone,
+            relationship=None if style_block else relationship,
+            tone=None if style_block else tone,
             style_block=style_block,
         )
 
