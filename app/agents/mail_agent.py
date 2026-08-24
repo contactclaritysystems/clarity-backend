@@ -143,7 +143,7 @@ def search_contacts(name: str, user_id: Optional[str] = None) -> List[dict]:
         q3 = sb.table("contacts").select(cols)
         if user_id:
             q3 = q3.eq("user_id", user_id)
-        all_rows = (q3.limit(300).execute().data) or []
+        all_rows = (q3.limit(150).execute().data) or []
         if not all_rows:
             print(f"[Mail Agent] Recherche '{name_clean}' → 0")
             return []
@@ -314,6 +314,7 @@ async def run_mail_agent(payload: dict) -> dict:
         return {"success": False, "message": "Aucune instruction reçue.", "request_id": request_id}
 
     try:
+        update_progress(request_id, "understanding", "Compréhension de la demande…")
         intent = await extract_intent(instruction, user_name)
         to_names = intent.get("to_names") or []
         cc_names = intent.get("cc_names") or []
@@ -374,7 +375,7 @@ async def run_mail_agent(payload: dict) -> dict:
             except Exception as e:
                 print(f"[Mail] contact reload err: {e}")
         contact_label = main_contact.get("full_name") or (to_names[0] if to_names else "")
-        update_progress(request_id, "contact_found", contact_label)
+        update_progress(request_id, "contact_found", f"Contact trouvé : {contact_label}")
 
         to_email = main_contact.get("email") or ""
         to_name = contact_label
@@ -405,7 +406,7 @@ async def run_mail_agent(payload: dict) -> dict:
                 out["cc"] = cc_email
             return out
 
-        update_progress(request_id, "generating_mail", contact_label)
+        update_progress(request_id, "generating_mail", f"Rédaction du mail pour {contact_label}…")
 
         style_block = ""
         # Toujours relire le contact juste avant le style (evite cache / ancienne key)
@@ -476,16 +477,34 @@ async def run_mail_agent(payload: dict) -> dict:
             style_block=style_block,
         )
 
-        # 2e passe si style charge (le 1er jet ignore souvent le vouvoiement)
+        # 2e passe UNIQUEMENT si le 1er jet ne respecte pas le style (gain de temps)
         if style and style_block:
-            email = await rewrite_email_to_style(
-                subject=email.get("subject") or "",
-                body=email.get("body") or "",
-                style=style,
-                user_name=user_name,
-                to_name=to_name,
-            )
-            print(f"[Mail] style rewrite done key={style_key}")
+            body0 = (email.get("body") or "")
+            ex0 = (style.get("example_message") or "").lower()
+            b0 = " " + body0.lower() + " "
+            needs = False
+            if any(w in ex0 for w in ("vous", "votre", "seriez", "pouvez")) and any(
+                w in b0 for w in (" tu ", " te ", " t'", " ton ", " ta ", " tes ")
+            ):
+                needs = True
+            if "salut" in ex0 and body0.lstrip().lower().startswith("bonjour"):
+                needs = True
+            if any(x in ex0 for x in ("mec", "a plus", "à plus")) and "cordialement" in b0:
+                needs = True
+            if "cordialement" in ex0 and ("à plus" in b0 or "a plus" in b0 or "salut mec" in b0):
+                needs = True
+            if needs:
+                update_progress(request_id, "generating_mail", f"Ajustement du style pour {to_name}…")
+                email = await rewrite_email_to_style(
+                    subject=email.get("subject") or "",
+                    body=body0,
+                    style=style,
+                    user_name=user_name,
+                    to_name=to_name,
+                )
+                print(f"[Mail] style rewrite done key={style_key}")
+            else:
+                print(f"[Mail] style rewrite skipped (1er jet OK) key={style_key}")
 
         body = email.get("body") or ""
         body = body.replace("L'utilisateur", user_name)
