@@ -181,6 +181,54 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
     return json.loads(response.choices[0].message.content)
 
 
+
+async def rewrite_email_to_style(subject: str, body: str, style: dict, user_name: str, to_name: str) -> dict:
+    """2e passe: force le style. Le modele ignore souvent le style au 1er jet."""
+    if not style:
+        return {"subject": subject, "body": body}
+    example = (style.get("example_message") or "").strip()
+    label = style.get("label") or style.get("key") or "style"
+    if not example:
+        return {"subject": subject, "body": body}
+    system = (
+        "Tu reecris un email pour coller EXACTEMENT au style demande. "
+        "Tu reponds UNIQUEMENT en JSON: {\"subject\": \"...\", \"body\": \"...\"}. "
+        "Regles: meme langue que l'exemple; meme tutoiement/vouvoiement; "
+        "memes types de salutation et de formule de fin; "
+        "ne change pas les faits (dates, heures, noms); "
+        "ecris a la 1re personne; signature = nom fourni; "
+        "si l'exemple vouvoie, INTERDIT d'utiliser tu/te/ton/ta."
+    )
+    user = (
+        f"Style: {label}\n"
+        f"Exemple a imiter:\n« {example} »\n\n"
+        f"Destinataire: {to_name}\n"
+        f"Signature: {user_name}\n\n"
+        f"Email actuel a reecrire:\n"
+        f"Objet: {subject}\n"
+        f"Corps:\n{body}"
+    )
+    try:
+        response = get_client().chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.1,
+            max_tokens=700,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(response.choices[0].message.content)
+        return {
+            "subject": data.get("subject") or subject,
+            "body": data.get("body") or body,
+        }
+    except Exception as e:
+        print(f"[Mail] rewrite style err: {e}")
+        return {"subject": subject, "body": body}
+
+
 async def run_mail_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
@@ -353,6 +401,17 @@ async def run_mail_agent(payload: dict) -> dict:
             tone=None if style_block else tone,
             style_block=style_block,
         )
+
+        # 2e passe si style charge (le 1er jet ignore souvent le vouvoiement)
+        if style and style_block:
+            email = await rewrite_email_to_style(
+                subject=email.get("subject") or "",
+                body=email.get("body") or "",
+                style=style,
+                user_name=user_name,
+                to_name=to_name,
+            )
+            print(f"[Mail] style rewrite done key={style_key}")
 
         body = email.get("body") or ""
         body = body.replace("L'utilisateur", user_name)
