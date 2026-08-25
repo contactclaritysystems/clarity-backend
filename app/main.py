@@ -17,6 +17,8 @@ from app.agents.relance_agent import run_relance_agent
 from app.agents.assistant_agent import run_assistant_agent
 from app.agents.redaction_agent import run_redaction_agent
 from app.writing_styles import list_styles, create_style
+from app.capabilities import public_payload
+from app.feature_requests import save_feature_request
 
 app = FastAPI(
     title="Clarity Backend",
@@ -77,6 +79,32 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+
+
+@app.get("/capabilities")
+async def capabilities_list():
+    """Liste disponible + bientôt (pour le bouton ? / réglages)."""
+    return public_payload()
+
+
+class FeatureRequestPayload(BaseModel):
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+    idea: str = ""
+    source: Optional[str] = "help"
+
+
+@app.post("/feature-request")
+async def feature_request_endpoint(payload: FeatureRequestPayload):
+    """Une idée, un besoin ? — enregistre pour l'équipe Clarity."""
+    return save_feature_request(
+        user_id=payload.user_id,
+        user_email=payload.user_email,
+        idea=payload.idea,
+        source=payload.source or "help",
+    )
 
 
 @app.post("/orchestrator")

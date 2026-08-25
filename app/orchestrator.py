@@ -9,6 +9,7 @@ import json
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
+from app.capabilities import capabilities_prompt_block
 
 load_dotenv()
 
@@ -121,7 +122,7 @@ async def run_orchestrator(payload: dict) -> dict:
         response = get_client().chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + capabilities_prompt_block()},
                 {"role": "user", "content": user_content}
             ],
             temperature=0.1,
