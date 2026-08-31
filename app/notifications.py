@@ -241,13 +241,24 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
             return {"success": False, "message": "Heure invalide (HH:MM)."}
         patch["digest_time"] = time_s
     if not patch:
-        return {"success": True, "settings": get_digest_settings(user_id)}
-    try:
-        sb.table("profiles").update(patch).eq("id", user_id).execute()
-    except Exception as e:
-        print(f"[Notify] save digest settings: {e}")
-        return {"success": False, "message": "Impossible d'enregistrer."}
-    return {"success": True, "settings": get_digest_settings(user_id)}
+        s = get_digest_settings(user_id)
+        return {"success": True, "settings": s, **s}
+    err = None
+    for col in ("id", "user_id"):
+        try:
+            r = sb.table("profiles").update(patch).eq(col, user_id).execute()
+            print(f"[Notify] digest update by {col}: {r.data}")
+            if r.data:
+                s = get_digest_settings(user_id)
+                return {"success": True, "settings": s, **s}
+        except Exception as e:
+            err = str(e)
+            print(f"[Notify] digest update {col}: {e}")
+    return {
+        "success": False,
+        "message": "Enregistrement impossible. Lance le SQL digest_* sur profiles.",
+        "error": err,
+    }
 
 
 def get_digest_settings(user_id: str) -> dict:
