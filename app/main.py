@@ -126,7 +126,8 @@ class DigestSettingsPayload(BaseModel):
 async def notify_settings_get(user_id: str = ""):
     if not user_id:
         return {"success": False, "message": "user_id manquant"}
-    return {"success": True, "settings": get_digest_settings(user_id)}
+    s = get_digest_settings(user_id)
+    return {"success": True, "settings": s, **s}
 
 
 @app.post("/notify/settings")
