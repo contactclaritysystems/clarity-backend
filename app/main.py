@@ -21,7 +21,7 @@ from app.agents.redaction_agent import run_redaction_agent
 from app.writing_styles import list_styles, create_style
 from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
-from app.notifications import run_notification_pass
+from app.notifications import run_notification_pass, send_email
 
 app = FastAPI(
     title="Clarity Backend",
@@ -82,6 +82,36 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+
+class NotifyTestPayload(BaseModel):
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+
+@app.post("/notify/test")
+async def notify_test(payload: NotifyTestPayload):
+    """Envoi immédiat d'un e-mail test (onboarding anti-spam)."""
+    email = (payload.user_email or "").strip()
+    if not email:
+        return {"success": False, "message": "Adresse e-mail manquante."}
+    result = send_email(
+        email,
+        "Test Clarity — vos rappels arriveront ici",
+        "Ceci est un test.\n\n"
+        "Si vous voyez ce message, les rappels et rendez-vous Clarity "
+        "arriveront bien sur cette adresse.\n\n"
+        "Conseil : ouvrez le message et cliquez sur \"Ceci n'est pas un spam\" "
+        "si besoin, pour les prochains avis.\n\n"
+        "— Clarity",
+    )
+    if result == "ok":
+        return {
+            "success": True,
+            "message": f"E-mail test envoyé à {email}. Pensez aux indésirables si vous ne le voyez pas.",
+        }
+    return {"success": False, "message": "Impossible d'envoyer le test pour le moment."}
 
 
 @app.get("/cron/notifications")
