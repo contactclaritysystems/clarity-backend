@@ -244,19 +244,18 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
         s = get_digest_settings(user_id)
         return {"success": True, "settings": s, **s}
     err = None
-    for col in ("id", "user_id"):
-        try:
-            r = sb.table("profiles").update(patch).eq(col, user_id).execute()
-            print(f"[Notify] digest update by {col}: {r.data}")
-            if r.data:
-                s = get_digest_settings(user_id)
-                return {"success": True, "settings": s, **s}
-        except Exception as e:
-            err = str(e)
-            print(f"[Notify] digest update {col}: {e}")
+    try:
+        r = sb.table("profiles").update(patch).eq("id", user_id).execute()
+        print(f"[Notify] digest update by id: {r.data}")
+        if r.data:
+            s = get_digest_settings(user_id)
+            return {"success": True, "settings": s, **s}
+    except Exception as e:
+        err = str(e)
+        print(f"[Notify] digest update id: {e}")
     return {
         "success": False,
-        "message": "Enregistrement impossible. Lance le SQL digest_* sur profiles.",
+        "message": "Profil introuvable pour enregistrer l'heure. Vérifie le SQL digest_* et que profiles.id = user_id.",
         "error": err,
     }
 
