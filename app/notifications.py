@@ -11,7 +11,6 @@ from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-import requests
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -76,11 +75,15 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
     webhook = os.getenv("NOTIFY_WEBHOOK_URL")
     if webhook:
         try:
-            requests.post(
+            import json as _json
+            from urllib.request import Request, urlopen
+            req = Request(
                 webhook,
-                json={"to": to_email, "subject": subject, "body": body},
-                timeout=20,
+                data=_json.dumps({"to": to_email, "subject": subject, "body": body}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
             )
+            urlopen(req, timeout=20).read()
             print(f"[Notify] webhook ok → {to_email} | {subject}")
             return True
         except Exception as e:
