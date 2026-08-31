@@ -100,10 +100,11 @@ async def notify_test(payload: NotifyTestPayload):
         email,
         "Test Clarity — vos rappels arriveront ici",
         "Ceci est un test.\n\n"
-        "Si vous voyez ce message, les rappels et rendez-vous Clarity "
+        "Si vous recevez ce message, les rappels et rendez-vous Clarity "
         "arriveront bien sur cette adresse.\n\n"
-        "Conseil : ouvrez le message et cliquez sur \"Ceci n'est pas un spam\" "
-        "si besoin, pour les prochains avis.\n\n"
+        "Si le mail est dans les indésirables : ouvrez-le et indiquez "
+        "« Non, ce n'est pas un spam ».\n"
+        "Vous pouvez aussi ajouter contact.claritysystems@gmail.com à vos contacts.\n\n"
         "— Clarity",
     )
     if result == "ok":
