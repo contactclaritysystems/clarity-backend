@@ -23,6 +23,8 @@ from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
 from app.notifications import run_notification_pass, send_email, get_digest_settings, save_digest_settings
 
+_NOTIFY_TEST_LAST = {}
+
 app = FastAPI(
     title="Clarity Backend",
     description="Remplacement natif des webhooks Make",
@@ -96,6 +98,14 @@ async def notify_test(payload: NotifyTestPayload):
     email = (payload.user_email or "").strip()
     if not email:
         return {"success": False, "message": "Adresse e-mail manquante."}
+    import time as _time
+    last = _NOTIFY_TEST_LAST.get(email.lower(), 0)
+    if _time.time() - last < 600:
+        return {
+            "success": False,
+            "message": "Un test a déjà été envoyé. Réessayez dans quelques minutes.",
+        }
+    _NOTIFY_TEST_LAST[email.lower()] = _time.time()
     result = send_email(
         email,
         "Test Clarity — vos rappels arriveront ici",
