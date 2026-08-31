@@ -128,6 +128,7 @@ async def notify_test(payload: NotifyTestPayload):
 
 class DigestSettingsPayload(BaseModel):
     user_id: Optional[str] = None
+    user_email: Optional[str] = None
     digest_enabled: Optional[bool] = None
     digest_time: Optional[str] = None
 
@@ -144,7 +145,7 @@ async def notify_settings_get(user_id: str = ""):
 async def notify_settings_post(payload: DigestSettingsPayload):
     if not payload.user_id:
         return {"success": False, "message": "user_id manquant"}
-    return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time)
+    return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time, payload.user_email)
 
 
 @app.get("/cron/notifications")

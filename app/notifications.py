@@ -226,7 +226,7 @@ def get_profile(sb: Client, user_id: str) -> Optional[dict]:
     return None
 
 
-def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str]) -> dict:
+def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str], user_email: Optional[str] = None) -> dict:
     sb = get_supabase()
     if not sb or not user_id:
         return {"success": False, "message": "Paramètres incomplets."}
@@ -244,18 +244,51 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
         s = get_digest_settings(user_id)
         return {"success": True, "settings": s, **s}
     err = None
+    row = None
     try:
         r = sb.table("profiles").update(patch).eq("id", user_id).execute()
-        print(f"[Notify] digest update by id: {r.data}")
         if r.data:
-            s = get_digest_settings(user_id)
-            return {"success": True, "settings": s, **s}
+            row = r.data[0]
     except Exception as e:
         err = str(e)
         print(f"[Notify] digest update id: {e}")
+    if not row and user_email:
+        try:
+            r = sb.table("profiles").update(patch).eq("email", user_email).execute()
+            if r.data:
+                row = r.data[0]
+        except Exception as e:
+            err = str(e)
+            print(f"[Notify] digest update email: {e}")
+    if not row:
+        insert_row = {"id": user_id, **patch}
+        if user_email:
+            insert_row["email"] = user_email
+        try:
+            r = sb.table("profiles").insert(insert_row).execute()
+            if r.data:
+                row = r.data[0]
+        except Exception as e:
+            err = str(e)
+            print(f"[Notify] digest insert: {e}")
+            insert_row.pop("email", None)
+            try:
+                r = sb.table("profiles").insert(insert_row).execute()
+                if r.data:
+                    row = r.data[0]
+            except Exception as e2:
+                err = str(e2)
+                print(f"[Notify] digest insert2: {e2}")
+    if row:
+        s = {
+            "digest_enabled": row.get("digest_enabled", True),
+            "digest_time": str(row.get("digest_time") or time_s or "07:30")[:5],
+            "digest_last_sent": None,
+        }
+        return {"success": True, "settings": s, **s}
     return {
         "success": False,
-        "message": "Profil introuvable pour enregistrer l'heure. Vérifie le SQL digest_* et que profiles.id = user_id.",
+        "message": "Impossible d'enregistrer. Envoie le SELECT id, email FROM profiles.",
         "error": err,
     }
 
