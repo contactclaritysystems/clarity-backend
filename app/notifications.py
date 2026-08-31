@@ -214,6 +214,173 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
     return sent
 
 
+
+
+def get_profile(sb: Client, user_id: str) -> Optional[dict]:
+    try:
+        r = sb.table("profiles").select("*").eq("id", user_id).limit(1).execute()
+        if r.data:
+            return r.data[0]
+    except Exception as e:
+        print(f"[Notify] get_profile: {e}")
+    return None
+
+
+def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str]) -> dict:
+    sb = get_supabase()
+    if not sb or not user_id:
+        return {"success": False, "message": "Paramètres incomplets."}
+    patch = {}
+    if enabled is not None:
+        patch["digest_enabled"] = bool(enabled)
+    if time_s:
+        time_s = str(time_s).strip()[:5]
+        try:
+            datetime.strptime(time_s, "%H:%M")
+        except Exception:
+            return {"success": False, "message": "Heure invalide (HH:MM)."}
+        patch["digest_time"] = time_s
+    if not patch:
+        return {"success": True, "settings": get_digest_settings(user_id)}
+    try:
+        sb.table("profiles").update(patch).eq("id", user_id).execute()
+    except Exception as e:
+        print(f"[Notify] save digest settings: {e}")
+        return {"success": False, "message": "Impossible d'enregistrer."}
+    return {"success": True, "settings": get_digest_settings(user_id)}
+
+
+def get_digest_settings(user_id: str) -> dict:
+    sb = get_supabase()
+    prof = get_profile(sb, user_id) if sb else None
+    enabled = True
+    time_s = "07:30"
+    last = None
+    if prof:
+        if prof.get("digest_enabled") is False:
+            enabled = False
+        if prof.get("digest_time"):
+            time_s = str(prof["digest_time"])[:5]
+        last = prof.get("digest_last_sent")
+    return {
+        "digest_enabled": enabled,
+        "digest_time": time_s,
+        "digest_last_sent": str(last)[:10] if last else None,
+    }
+
+
+def day_items(sb: Client, user_id: str, day: str) -> tuple:
+    rappels, rdvs = [], []
+    try:
+        rows = (
+            sb.table("follow_ups")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("reminder_date", day)
+            .limit(50)
+            .execute()
+            .data
+            or []
+        )
+        for r in rows:
+            st = (r.get("status") or "pending").lower()
+            if st in ("done", "cancelled", "canceled"):
+                continue
+            hh = str(r.get("reminder_time") or "")[:5]
+            motif = r.get("reason") or "Rappel"
+            rappels.append((hh or "??:??", motif, r.get("contact_name") or ""))
+    except Exception as e:
+        print(f"[Notify] digest follow_ups: {e}")
+    try:
+        rows = (
+            sb.table("appointments")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("appointment_date", day)
+            .limit(50)
+            .execute()
+            .data
+            or []
+        )
+        for r in rows:
+            st = (r.get("status") or "scheduled").lower()
+            if st in ("done", "cancelled", "canceled"):
+                continue
+            hh = str(r.get("appointment_time") or "")[:5]
+            motif = r.get("title") or "Rendez-vous"
+            rdvs.append((hh or "??:??", motif, r.get("contact_name") or ""))
+    except Exception as e:
+        print(f"[Notify] digest appointments: {e}")
+    rappels.sort()
+    rdvs.sort()
+    return rappels, rdvs
+
+
+def format_digest(day_fr: str, rappels: list, rdvs: list) -> tuple:
+    subject = f"Votre journée Clarity — {day_fr}"
+    lines = [f"Voici ce qui est prévu aujourd'hui ({day_fr}).", ""]
+    if rdvs:
+        lines.append(f"Rendez-vous ({len(rdvs)})")
+        for hh, motif, who in rdvs:
+            extra = f" — {who}" if who else ""
+            lines.append(f"• {hh}  {motif}{extra}")
+        lines.append("")
+    if rappels:
+        lines.append(f"Rappels ({len(rappels)})")
+        for hh, motif, who in rappels:
+            extra = f" — {who}" if who and who != "Moi" else ""
+            lines.append(f"• {hh}  {motif}{extra}")
+        lines.append("")
+    if not rdvs and not rappels:
+        lines.append("Rien de noté pour aujourd'hui.")
+        lines.append("")
+    lines.append("— Clarity")
+    return subject, "\n".join(lines)
+
+
+def process_digests(sb: Client, now: datetime, cache: dict, debug: list) -> List[str]:
+    sent = []
+    today = now.strftime("%Y-%m-%d")
+    try:
+        profiles = sb.table("profiles").select("*").limit(500).execute().data or []
+    except Exception as e:
+        debug.append(f"profiles load: {e}")
+        return sent
+    for prof in profiles:
+        uid = str(prof.get("id") or "")
+        if not uid:
+            continue
+        if prof.get("digest_enabled") is False:
+            continue
+        time_s = str(prof.get("digest_time") or "07:30")[:5]
+        target = parse_dt(today, time_s)
+        if not target:
+            continue
+        last = str(prof.get("digest_last_sent") or "")[:10]
+        if last == today:
+            continue
+        # fenêtre : de l'heure choisie jusqu'à +12 min (plusieurs ticks cron)
+        if now < target or now - target > timedelta(minutes=12):
+            continue
+        email = lookup_email(sb, uid, cache) or prof.get("email") or prof.get("user_email")
+        if not email:
+            debug.append(f"digest no-email {uid}")
+            continue
+        rappels, rdvs = day_items(sb, uid, today)
+        day_fr = now.strftime("%d/%m/%Y")
+        subject, body = format_digest(day_fr, rappels, rdvs)
+        result = send_email(email, subject, body)
+        if result == "ok":
+            try:
+                sb.table("profiles").update({"digest_last_sent": today}).eq("id", uid).execute()
+            except Exception as e:
+                print(f"[Notify] digest_last_sent: {e}")
+            sent.append(email)
+        else:
+            debug.append(f"digest send-fail {email}: {result}")
+    return sent
+
+
 def run_notification_pass() -> dict:
     sb = get_supabase()
     if not sb:
@@ -223,11 +390,13 @@ def run_notification_pass() -> dict:
     debug: list = []
     rappels = process_reminders(sb, now, cache, debug)
     rdvs = process_appointments(sb, now, cache, debug)
+    digests = process_digests(sb, now, cache, debug)
     print(f"[Notify] pass {now.isoformat()} rappels={rappels} rdvs={rdvs} debug={debug}")
     return {
         "ok": True,
         "now": now.isoformat(),
         "reminders_sent": rappels,
         "appointments_sent": rdvs,
+        "digests_sent": digests,
         "debug": debug[-20:],
     }

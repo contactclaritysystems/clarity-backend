@@ -21,7 +21,7 @@ from app.agents.redaction_agent import run_redaction_agent
 from app.writing_styles import list_styles, create_style
 from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
-from app.notifications import run_notification_pass, send_email
+from app.notifications import run_notification_pass, send_email, get_digest_settings, save_digest_settings
 
 app = FastAPI(
     title="Clarity Backend",
@@ -113,6 +113,27 @@ async def notify_test(payload: NotifyTestPayload):
             "message": f"E-mail test envoyé à {email}. Pensez aux indésirables si vous ne le voyez pas.",
         }
     return {"success": False, "message": "Impossible d'envoyer le test pour le moment."}
+
+
+
+class DigestSettingsPayload(BaseModel):
+    user_id: Optional[str] = None
+    digest_enabled: Optional[bool] = None
+    digest_time: Optional[str] = None
+
+
+@app.get("/notify/settings")
+async def notify_settings_get(user_id: str = ""):
+    if not user_id:
+        return {"success": False, "message": "user_id manquant"}
+    return {"success": True, "settings": get_digest_settings(user_id)}
+
+
+@app.post("/notify/settings")
+async def notify_settings_post(payload: DigestSettingsPayload):
+    if not payload.user_id:
+        return {"success": False, "message": "user_id manquant"}
+    return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time)
 
 
 @app.get("/cron/notifications")
