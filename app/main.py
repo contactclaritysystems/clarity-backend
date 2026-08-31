@@ -1,3 +1,4 @@
+import os
 """
 Clarity Systems - Backend natif
 """
@@ -5,8 +6,9 @@ Clarity Systems - Backend natif
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -19,6 +21,7 @@ from app.agents.redaction_agent import run_redaction_agent
 from app.writing_styles import list_styles, create_style
 from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
+from app.notifications import run_notification_pass
 
 app = FastAPI(
     title="Clarity Backend",
@@ -79,6 +82,22 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/cron/notifications")
+@app.post("/cron/notifications")
+async def cron_notifications(request: Request):
+    """Appelé toutes les 2 min (cron-job.org). Protégé par CRON_SECRET."""
+    secret = os.getenv("CRON_SECRET") or ""
+    q = request.query_params.get("secret") or ""
+    auth = request.headers.get("authorization") or ""
+    token = q
+    if auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1].strip()
+    if secret and token != secret:
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    return run_notification_pass()
+
 
 
 
