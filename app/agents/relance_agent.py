@@ -245,6 +245,27 @@ def create_follow_up(user_id: str, data: dict):
 
 
 
+def is_weak_reason(reason: str, instruction: str = "") -> bool:
+    r = (reason or "").strip().lower()
+    if not r:
+        return True
+    weak = (
+        "rappel", "relance", "pense", "penser", "rappelle-moi", "rappelle moi",
+        "fais-moi penser", "fais moi penser", "un rappel", "rappel pour",
+    )
+    if r in weak or r in ("rappel.", "un rappel."):
+        return True
+    inst = (instruction or "").strip().lower()
+    # "rappelle moi" only → whatever the LLM invented from nothing is weak
+    core = inst.replace("s'", " ").replace("'", " ")
+    if inst in (
+        "rappelle moi", "rappelle-moi", "fais moi penser", "fais-moi penser",
+        "crée un rappel", "creer un rappel", "un rappel",
+    ):
+        return True
+    return False
+
+
 async def run_relance_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
@@ -289,7 +310,8 @@ async def run_relance_agent(payload: dict) -> dict:
         if instruction:
             llm = await extract_llm(instruction)
             if llm.get("reason") and not slots.get("reason"):
-                slots["reason"] = llm["reason"]
+                if not is_weak_reason(llm.get("reason"), instruction):
+                    slots["reason"] = llm["reason"]
             if llm.get("contact_name") and not slots.get("contact_name"):
                 slots["contact_name"] = llm["contact_name"]
             if llm.get("message_context") and not slots.get("message_context"):
@@ -308,11 +330,12 @@ async def run_relance_agent(payload: dict) -> dict:
             return question
 
         # Contenu du rappel obligatoire
-        if not slots.get("reason"):
+        if not slots.get("reason") or is_weak_reason(slots.get("reason") or "", instruction):
+            slots.pop("reason", None)
             return {
                 "success": False,
                 "reason": "missing_content",
-                "message": retained_msg("De quoi dois-je te rappeler ?"),
+                "message": retained_msg("De quoi dois-je vous rappeler ?"),
                 "partial": slots,
                 "request_id": request_id,
             }

@@ -522,9 +522,14 @@ async def run_mail_agent(payload: dict) -> dict:
 
         update_progress(request_id, "ready", contact_label)
 
+        subj = (email.get("subject") or "").strip()
+        if not subj or subj.lower() in ("sans objet", "no subject", "(sans objet)"):
+            raw = (content_summary or body or "Message").strip().split("\n")[0]
+            raw = raw[:70].rstrip(" .")
+            subj = raw[0].upper() + raw[1:] if raw else "Message"
         result = {
             "to": to_email,
-            "subject": email.get("subject") or "Sans objet",
+            "subject": subj,
             "body": body,
             "contact_name": to_name,
             "success": True,
