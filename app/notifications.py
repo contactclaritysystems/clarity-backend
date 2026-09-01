@@ -143,6 +143,20 @@ def load_rows(sb: Client, table: str) -> List[dict]:
         return []
 
 
+def user_offsets(sb: Client, user_id: str, cache: dict) -> dict:
+    key = f"off:{user_id}"
+    if key in cache:
+        return cache[key]
+    rem, appt = "0", "60"
+    prof = get_profile(sb, user_id) if user_id else None
+    if prof:
+        rem = str(prof.get("reminder_offset") or "0")
+        appt = str(prof.get("appointment_offset") or "60")
+    out = {"reminder": rem, "appointment": appt}
+    cache[key] = out
+    return out
+
+
 def process_reminders(sb: Client, now: datetime, cache: dict, debug: list) -> List[str]:
     sent = []
     rows = load_rows(sb, "follow_ups")
@@ -153,11 +167,16 @@ def process_reminders(sb: Client, now: datetime, cache: dict, debug: list) -> Li
         status = (row.get("status") or "pending").lower()
         if status in ("done", "cancelled", "canceled"):
             continue
+        off = user_offsets(sb, str(row.get("user_id") or ""), cache)
+        if off["reminder"] in ("off", "none", "false"):
+            continue
+        lead_min = 15 if off["reminder"] in ("15", "15min") else 0
         when = parse_dt(row.get("reminder_date"), row.get("reminder_time"))
         if not when:
             debug.append(f"skip no-date id={row.get('id')}")
             continue
-        if when > now:
+        start = when - timedelta(minutes=lead_min)
+        if now < start:
             continue
         if now - when > MAX_LATENESS:
             continue
@@ -192,7 +211,11 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
         when = parse_dt(row.get("appointment_date"), row.get("appointment_time"))
         if not when:
             continue
-        if now < when - RDV_LEAD:
+        off = user_offsets(sb, str(row.get("user_id") or ""), cache)
+        if off["appointment"] in ("off", "none", "false", "digest"):
+            continue
+        lead_min = 15 if off["appointment"] in ("15", "15min") else 60
+        if now < when - timedelta(minutes=lead_min):
             continue
         if now - when > timedelta(minutes=20):
             continue
@@ -203,7 +226,8 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
             continue
         heure = when.strftime("%d/%m/%Y à %H:%M")
         who = (row.get("contact_name") or "").strip()
-        subject = f"RDV Clarity dans 1 h : {motif}"
+        lead_txt = "dans 15 min" if off["appointment"] in ("15", "15min") else "dans 1 h"
+        subject = f"RDV Clarity {lead_txt} : {motif}"
         body = f"{motif}\n\n{heure}" + (f"\nAvec : {who}" if who else "") + "\n\n— Clarity"
         result = send_email(email, subject, body)
         if result == "ok":
@@ -226,7 +250,7 @@ def get_profile(sb: Client, user_id: str) -> Optional[dict]:
     return None
 
 
-def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str], user_email: Optional[str] = None) -> dict:
+def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str], user_email: Optional[str] = None, reminder_offset: Optional[str] = None, appointment_offset: Optional[str] = None) -> dict:
     sb = get_supabase()
     if not sb or not user_id:
         return {"success": False, "message": "Paramètres incomplets."}
@@ -240,6 +264,18 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
         except Exception:
             return {"success": False, "message": "Heure invalide (HH:MM)."}
         patch["digest_time"] = time_s
+    allowed_rem = ("0", "15", "off")
+    allowed_rdv = ("60", "15", "digest", "off")
+    if reminder_offset is not None:
+        reminder_offset = str(reminder_offset).strip()
+        if reminder_offset not in allowed_rem:
+            return {"success": False, "message": "reminder_offset invalide"}
+        patch["reminder_offset"] = reminder_offset
+    if appointment_offset is not None:
+        appointment_offset = str(appointment_offset).strip()
+        if appointment_offset not in allowed_rdv:
+            return {"success": False, "message": "appointment_offset invalide"}
+        patch["appointment_offset"] = appointment_offset
     if not patch:
         s = get_digest_settings(user_id)
         return {"success": True, "settings": s, **s}
@@ -284,6 +320,8 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
             "digest_enabled": row.get("digest_enabled", True),
             "digest_time": str(row.get("digest_time") or time_s or "07:30")[:5],
             "digest_last_sent": None,
+            "reminder_offset": str(row.get("reminder_offset") or "0"),
+            "appointment_offset": str(row.get("appointment_offset") or "60"),
         }
         return {"success": True, "settings": s, **s}
     return {
@@ -305,10 +343,16 @@ def get_digest_settings(user_id: str) -> dict:
         if prof.get("digest_time"):
             time_s = str(prof["digest_time"])[:5]
         last = prof.get("digest_last_sent")
+    rem, appt = "0", "60"
+    if prof:
+        rem = str(prof.get("reminder_offset") or "0")
+        appt = str(prof.get("appointment_offset") or "60")
     return {
         "digest_enabled": enabled,
         "digest_time": time_s,
         "digest_last_sent": str(last)[:10] if last else None,
+        "reminder_offset": rem,
+        "appointment_offset": appt,
     }
 
 
