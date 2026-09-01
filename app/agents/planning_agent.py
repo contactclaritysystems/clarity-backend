@@ -446,19 +446,21 @@ async def run_planning_agent(payload: dict) -> dict:
                 "request_id": request_id,
             }
 
-        if not slots.get("contact_name"):
+        title = (slots.get("title") or "").strip()
+        if title.lower() in ("rendez-vous", "rdv", "rendez vous"):
+            title = ""
+        contact = (slots.get("contact_name") or "").strip()
+        if not contact and not title:
             return {
                 "success": False,
                 "reason": "missing_contact",
-                "message": retained_msg("Avec qui est le rendez-vous ?"),
+                "message": retained_msg("Avec qui, ou pour quel motif ?"),
                 "partial": slots,
                 "context_hint": f"RDV partial: {partial_tag}",
                 "request_id": request_id,
             }
-
-        # Motif : défaut soft, on ne bloque pas
         if not slots.get("title"):
-            slots["title"] = "Rendez-vous"
+            slots["title"] = title or "Rendez-vous"
 
         # Résoudre contact
         contact_id = slots.get("contact_id")
