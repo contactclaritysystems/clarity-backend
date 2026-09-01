@@ -47,6 +47,34 @@ DEFAULT_STYLES = [
         "opening": "Bonjour",
         "closing": "Cordialement",
     },
+    {
+        "key": "fournisseur",
+        "label": "Fournisseur",
+        "example_message": "Bonjour, pourriez-vous me confirmer la date de livraison ?",
+        "opening": "Bonjour",
+        "closing": "Cordialement",
+    },
+    {
+        "key": "prospect",
+        "label": "Prospect",
+        "example_message": "Bonjour, je vous propose un créneau pour vous présenter notre offre.",
+        "opening": "Bonjour",
+        "closing": "Cordialement",
+    },
+    {
+        "key": "administration",
+        "label": "Administration",
+        "example_message": "Bonjour, je me permets de vous écrire afin de convenir d'un rendez-vous.",
+        "opening": "Madame, Monsieur",
+        "closing": "Veuillez agréer mes salutations",
+    },
+    {
+        "key": "equipe",
+        "label": "Équipe",
+        "example_message": "Hello, on se retrouve demain 8h sur le chantier, n'oubliez pas vos outils.",
+        "opening": "Hello",
+        "closing": "À demain",
+    },
 ]
 
 
