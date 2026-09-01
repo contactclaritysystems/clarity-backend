@@ -103,8 +103,12 @@ def _norm_name(s: str) -> str:
     return " ".join(s.split())
 
 
+def _first(s: str) -> str:
+    return (s or "").split()[0] if s else ""
+
+
 def search_contacts(name: str, user_id: Optional[str] = None) -> List[dict]:
-    """Recherche tolérante: exact/partiel, puis fautes de frappe / orthographes proches."""
+    """Toujours scorer tout le carnet : Anthony + Antoni doivent sortir ensemble."""
     sb = get_supabase()
     if not sb:
         return []
@@ -114,63 +118,42 @@ def search_contacts(name: str, user_id: Optional[str] = None) -> List[dict]:
             return []
 
         cols = "id, full_name, email, company, writing_style_key"
-        base = sb.table("contacts").select(cols)
+        q = sb.table("contacts").select(cols)
         if user_id:
-            base = base.eq("user_id", user_id)
-
-        # 1) Correspondance partielle classique
-        result = base.ilike("full_name", f"%{name_clean}%").limit(10).execute()
-        rows = result.data or []
-        if rows:
-            print(f"[Mail Agent] Recherche '{name_clean}' → {len(rows)} (ilike)")
-            return rows
-
-        # 2) Préfixe (Anthonyy → Anthon%)
-        if len(name_clean) >= 3:
-            prefix = name_clean[: max(3, len(name_clean) - 1)]
-            q2 = sb.table("contacts").select(cols)
-            if user_id:
-                q2 = q2.eq("user_id", user_id)
-            rows = (q2.ilike("full_name", f"{prefix}%").limit(15).execute().data) or []
-            if len(rows) == 1:
-                print(f"[Mail Agent] Recherche '{name_clean}' → 1 (prefix {prefix})")
-                return rows
-            if rows:
-                # on continue pour scorer si plusieurs
-                pass
-
-        # 3) Fuzzy sur le carnet de l'utilisateur (fautes, Michael/Mickael)
-        q3 = sb.table("contacts").select(cols)
-        if user_id:
-            q3 = q3.eq("user_id", user_id)
-        all_rows = (q3.limit(150).execute().data) or []
+            q = q.eq("user_id", user_id)
+        all_rows = (q.limit(300).execute().data) or []
         if not all_rows:
-            print(f"[Mail Agent] Recherche '{name_clean}' → 0")
             return []
 
         needle = _norm_name(name_clean)
-        needle_tokens = needle.split()
+        n0 = _first(needle)
         scored = []
+        seen = set()
         for c in all_rows:
+            cid = c.get("id")
             full = _norm_name(c.get("full_name") or "")
-            if not full:
+            if not full or cid in seen:
                 continue
-            # ratio global + ratio sur le prenom (1er mot)
+            first = _first(full)
             r_full = difflib.SequenceMatcher(None, needle, full).ratio()
-            first = full.split()[0] if full.split() else full
-            r_first = difflib.SequenceMatcher(None, needle_tokens[0] if needle_tokens else needle, first).ratio()
-            # bonus si le debut correspond
-            bonus = 0.08 if first.startswith(needle[:3]) or needle.startswith(first[:3]) else 0.0
-            score = max(r_full, r_first) + bonus
-            if score >= 0.72:
+            r_first = difflib.SequenceMatcher(None, n0, first).ratio()
+            close = False
+            if needle in full or full in needle:
+                close = True
+            if first.startswith(n0[:4]) or n0.startswith(first[:4]):
+                close = True
+            if abs(len(first) - len(n0)) <= 2 and r_first >= 0.72:
+                close = True
+            score = max(r_full, r_first)
+            if first == n0:
+                score = max(score, 0.99)
+            if close or score >= 0.74:
+                seen.add(cid)
                 scored.append((score, c))
 
         scored.sort(key=lambda x: -x[0])
-        best = [c for _, c in scored[:5]]
-        print(
-            f"[Mail Agent] Recherche '{name_clean}' → {len(best)} (fuzzy) "
-            f"top={scored[0][0]:.2f}" if scored else f"[Mail Agent] Recherche '{name_clean}' → 0 (fuzzy)"
-        )
+        best = [c for _, c in scored[:8]]
+        print(f"[Mail Agent] Recherche '{name_clean}' → {len(best)} contacts")
         return best
     except Exception as e:
         print(f"[Mail Agent] Erreur Supabase: {e}")
