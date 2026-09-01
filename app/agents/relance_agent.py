@@ -247,21 +247,29 @@ def create_follow_up(user_id: str, data: dict):
 
 def is_weak_reason(reason: str, instruction: str = "") -> bool:
     r = (reason or "").strip().lower()
+    inst = (instruction or "").strip().lower()
+    inst = inst.replace("’", "'").replace("s'", " ")
+    only_ask = (
+        "rappelle moi", "rappelle-moi", "rappel moi",
+        "fais moi penser", "fais-moi penser",
+        "cree un rappel", "crée un rappel", "creer un rappel",
+        "un rappel", "rappel",
+    )
+    if inst in only_ask or inst.rstrip(".!") in only_ask:
+        return True
     if not r:
         return True
-    weak = (
-        "rappel", "relance", "pense", "penser", "rappelle-moi", "rappelle moi",
-        "fais-moi penser", "fais moi penser", "un rappel", "rappel pour",
+    junk = (
+        "rappel", "relance", "penser", "pense",
+        "ne pas oublier", "n'oublie pas", "oublie pas",
+        "de me rappeler", "me rappeler", "te rappeler",
+        "rappelle-moi", "rappelle moi",
     )
-    if r in weak or r in ("rappel.", "un rappel."):
-        return True
-    inst = (instruction or "").strip().lower()
-    # "rappelle moi" only → whatever the LLM invented from nothing is weak
-    core = inst.replace("s'", " ").replace("'", " ")
-    if inst in (
-        "rappelle moi", "rappelle-moi", "fais moi penser", "fais-moi penser",
-        "crée un rappel", "creer un rappel", "un rappel",
-    ):
+    compact = r
+    for j in junk:
+        compact = compact.replace(j, " ")
+    compact = " ".join(compact.split())
+    if len(compact) < 3:
         return True
     return False
 
