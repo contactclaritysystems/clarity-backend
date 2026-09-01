@@ -127,7 +127,7 @@ def detect_form_type(instruction: str) -> str:
     t = (instruction or "").lower()
     if any(w in t for w in ("compte-rendu", "compte rendu", "cr de", "cr d'", "réunion", "reunion")):
         return "compte_rendu"
-    if any(w in t for w in ("post", "linkedin", "instagram", "réseaux", "reseaux", "facebook")):
+    if any(w in t for w in ("post", "linkedin", "instagram", "insta", "story", "stories", "réseaux", "reseaux", "facebook", "tiktok")):
         return "post"
     if any(w in t for w in ("offre", "promo", "promotion", "essai gratuit", "rentrée", "rentree")):
         return "offre"
