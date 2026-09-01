@@ -62,7 +62,11 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
             lines.append("Rendez-vous (14 prochains jours) :")
             for a in rows:
                 d = a.get("appointment_date") or "?"
+                if len(str(d)) >= 10:
+                    y, m, day = str(d)[:10].split("-")
+                    d = f"{day}/{m}/{y}"
                 t = a.get("appointment_time") or ""
+                t = str(t)[:5]
                 title = a.get("title") or "RDV"
                 contact = a.get("contact_name") or ""
                 st = (a.get("status") or "").lower()
@@ -104,7 +108,11 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
             lines.append("Rappels / relances en attente :")
             for f in rows:
                 d = f.get("reminder_date") or "?"
+                if len(str(d)) >= 10:
+                    y, m, day = str(d)[:10].split("-")
+                    d = f"{day}/{m}/{y}"
                 t = f.get("reminder_time") or ""
+                t = str(t)[:5]
                 reason = f.get("reason") or "Rappel"
                 contact = f.get("contact_name") or ""
                 bit = f"- {d}"
@@ -158,7 +166,7 @@ RÈGLES :
 1. Planning / rappels / contacts : uniquement le CONTEXTE CLARITY. Pas d'invention.
 2. Question d'actualité, société, sport, prix : priorisez RECHERCHE WEB.
    INTERDIT de dire que vos connaissances s'arrêtent en 2023 ou qu'vous n'avez pas Internet.
-   Si le web est vide : dites simplement que vous n'avez pas pu vérifier en direct, sans inventer de date de coupure.
+   Si le web est vide : deux phrases max, sans « dernière mise à jour », sans année de coupure, sans inventer l'actu.
 3. Jamais de markdown (**gras**, puces *). Texte simple, listes avec des tirets.
 4. Jamais les codes done / scheduled / pending. Pas "(à venir)" si c'est déjà dit par la date.
 5. Pas de phrase de fin commerciale ("n'hésitez pas", "je reste à votre disposition").
@@ -256,6 +264,26 @@ def search_crypto(instruction: str) -> str:
         return ""
 
 
+
+def search_wiki_summary(query: str) -> str:
+    try:
+        import urllib.parse, json
+        title = urllib.parse.quote(query.strip().replace(" ", "_"))
+        for lang in ("fr", "en"):
+            url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{title}"
+            try:
+                data = _http_json(url)
+            except Exception:
+                continue
+            extract = (data.get("extract") or "").strip()
+            label = data.get("title") or query
+            if extract:
+                return f"{label} : {extract[:800]}"
+    except Exception as e:
+        print(f"[wiki-sum] {e}")
+    return ""
+
+
 def search_wikipedia(query: str) -> str:
     try:
         import urllib.parse
@@ -324,8 +352,11 @@ def web_search(query: str, max_results: int = 5) -> str:
     crypto = search_crypto(query)
     if crypto:
         blocks.append(crypto)
+    wsum = search_wiki_summary(query)
+    if wsum:
+        blocks.append("Wikipedia :\n" + wsum)
     wiki = search_wikipedia(query)
-    if wiki:
+    if wiki and not wsum:
         blocks.append("Wikipedia :\n" + wiki)
     ddg = search_duckduckgo(query)
     if ddg:
