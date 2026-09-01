@@ -55,7 +55,9 @@ RÈGLES DE ROUTAGE (dans l'ordre)
 1. Si la demande implique d'ENVOYER, PRÉPARER un email/message À quelqu'un (ex: "message pour Antoine", "dis-lui que...", "préviens Paul") → "mail"
 2. Si c'est CRÉER un rendez-vous / une réunion → "planning"
 3. Si c'est CRÉER un rappel / "fais-moi penser" → "relance"
-4. Si c'est rédiger SANS destinataire (post, offre, CR, note, « message » seul sans « pour X ») → "redaction"
+4. Si c'est rédiger SANS destinataire email (post, Insta, LinkedIn, offre, CR, SMS à publier, « message pour Instagram ») → "redaction"
+   « message pour Insta / LinkedIn / Facebook / Stories » = REDACTION, jamais mail.
+   Mail seulement si un DESTINATAIRE PERSONNE (Antoine, mon patron) ou « envoie un mail ».
 5. Sinon → "assistant"
 
 ═══════════════════════════════════════
@@ -161,17 +163,17 @@ async def run_orchestrator(payload: dict) -> dict:
             "message pour", "message a", "message à", "dis-lui", "dis lui", "dit-lui", "dit lui",
             "préviens", "previens", "prévenez", "dis à", "dis a",
         ]
-        redaction_words = ["linkedin", "compte-rendu", "compte rendu", "rédige", "redige", "post", "offre", "annonce", "texte pour le site"]
+        redaction_words = ["linkedin", "instagram", "insta", "facebook", "stories", "compte-rendu", "compte rendu", "rédige", "redige", "post", "offre", "annonce", "texte pour le site"]
         planning_create = ["ajoute un rdv", "ajoute un rendez-vous", "planifie", "note un rdv", "prend un rdv", "prends un rdv"]
         relance_create = ["fais-moi penser", "fais moi penser", "rappelle-moi", "rappelle moi", "crée un rappel", "creer un rappel"]
         question_words = ["qu'est-ce", "quest-ce", "quels", "quelles", "ai-je", "est-ce que", "résume", "resume", "combien", "montre", "liste"]
 
         if any(w in lower for w in question_words):
             agent = "assistant"
-        elif any(w in lower for w in mail_words):
-            agent = "mail"
         elif any(w in lower for w in redaction_words):
             agent = "redaction"
+        elif any(w in lower for w in mail_words):
+            agent = "mail"
         elif any(w in lower for w in relance_create):
             agent = "relance"
         elif any(w in lower for w in planning_create):

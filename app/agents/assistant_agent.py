@@ -5,6 +5,7 @@ Répond avec le contexte réel de l'utilisateur (planning, relances, profil).
 
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, Any, Dict, List
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -40,8 +41,9 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
         return f"Utilisateur : {user_name or user_id}. Supabase indisponible."
 
     lines: List[str] = [f"Utilisateur : {user_name or user_id}"]
-    today = datetime.now().strftime("%Y-%m-%d")
-    in_14 = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    today = now.strftime("%Y-%m-%d")
+    in_14 = (now + timedelta(days=14)).strftime("%Y-%m-%d")
 
     # RDV à venir
     try:
@@ -148,19 +150,19 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
     return "\n".join(lines)
 
 
-SYSTEM = """Tu es Clarity, l'assistante professionnelle d'un dirigeant / artisan (TPE-PME).
-Tu vous adressez TOUJOURS à lui avec le VOUVOIEMENT (vous / votre / vos).
-Jamais de tutoiement. Jamais "l'utilisateur". Jamais la 3e personne.
+SYSTEM = """Tu es Clarity, assistante professionnelle. VOUVOIEMENT uniquement.
+
+DATE : la ligne "Date/heure actuelle" est la vérité (Europe/Paris). "Aujourd'hui" = cette date-là.
 
 RÈGLES :
-1. Priorité au CONTEXTE CLARITY (RDV, rappels, contacts) pour tout ce qui concerne SON activité.
-2. Si une section "RECHERCHE WEB" contient des faits → priorisez-les (cours, extraits).
-   Si elle est vide ou faible → répondez avec vos connaissances, en signalant les limites temps réel.
-3. N'affiche JAMAIS les codes techniques (done, scheduled, pending…).
-   Dis plutôt : terminé, à venir, en attente.
-4. N'invente pas de RDV, contacts ou horaires absents du contexte.
-5. Réponses claires, structurées, professionnelles, pas trop longues.
-6. Vous n'exécutez pas les actions (mail, RDV) : vous informez seulement.
+1. Planning / rappels / contacts : uniquement le CONTEXTE CLARITY. Pas d'invention.
+2. Question d'actualité, société, sport, prix : priorisez RECHERCHE WEB.
+   INTERDIT de dire que vos connaissances s'arrêtent en 2023 ou qu'vous n'avez pas Internet.
+   Si le web est vide : dites simplement que vous n'avez pas pu vérifier en direct, sans inventer de date de coupure.
+3. Jamais de markdown (**gras**, puces *). Texte simple, listes avec des tirets.
+4. Jamais les codes done / scheduled / pending. Pas "(à venir)" si c'est déjà dit par la date.
+5. Pas de phrase de fin commerciale ("n'hésitez pas", "je reste à votre disposition").
+6. Devis, facture, WhatsApp, agenda Google : dites en 2 phrases que c'est bientôt, sans proposer un faux devis.
 """
 
 
@@ -341,7 +343,7 @@ async def run_assistant_agent(payload: dict) -> dict:
     if not instruction:
         return {
             "success": False,
-            "message": "Quelle est ta question ?",
+            "message": "Quelle est votre question ?",
             "request_id": request_id,
         }
 
@@ -350,7 +352,7 @@ async def run_assistant_agent(payload: dict) -> dict:
         mem = memory_as_text(load_memory(user_id))
         if mem:
             context = context + "\n\n" + mem
-        today_fr = datetime.now().strftime("%d/%m/%Y %H:%M")
+        today_fr = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M")
 
         web_block = ""
         if needs_web_search(instruction):
@@ -385,14 +387,22 @@ async def run_assistant_agent(payload: dict) -> dict:
             max_tokens=900,
         )
         answer = (response.choices[0].message.content or "").strip()
+        low_i = instruction.lower()
+        coming = any(k in low_i for k in (
+            "devis", "facture", "whatsapp", "chantier", "google calendar",
+            "agenda google", "pièce jointe", "piece jointe",
+        ))
         if not answer:
-            answer = "Je n'ai pas pu formuler de réponse. Reformule ta question."
+            answer = "Je n'ai pas pu formuler de réponse. Reformulez votre question."
 
+        import re
+        answer = re.sub(r"\*\*", "", answer)
         return {
             "success": True,
             "title": "Clarity",
             "message": answer,
             "content": answer,
+            "coming_soon": bool(coming),
             "request_id": request_id,
         }
     except Exception as e:
