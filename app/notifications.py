@@ -168,9 +168,12 @@ def process_reminders(sb: Client, now: datetime, cache: dict, debug: list) -> Li
         if status in ("done", "cancelled", "canceled"):
             continue
         off = user_offsets(sb, str(row.get("user_id") or ""), cache)
-        if off["reminder"] in ("off", "none", "false"):
+        if off["reminder"] in ("off", "none", "false", "digest"):
             continue
-        lead_min = 15 if off["reminder"] in ("15", "15min") else 0
+        try:
+            lead_min = int(off["reminder"])
+        except Exception:
+            lead_min = 0
         when = parse_dt(row.get("reminder_date"), row.get("reminder_time"))
         if not when:
             debug.append(f"skip no-date id={row.get('id')}")
@@ -214,7 +217,10 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
         off = user_offsets(sb, str(row.get("user_id") or ""), cache)
         if off["appointment"] in ("off", "none", "false", "digest"):
             continue
-        lead_min = 15 if off["appointment"] in ("15", "15min") else 60
+        try:
+            lead_min = int(off["appointment"])
+        except Exception:
+            lead_min = 60
         if now < when - timedelta(minutes=lead_min):
             continue
         if now - when > timedelta(minutes=20):
@@ -226,7 +232,13 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
             continue
         heure = when.strftime("%d/%m/%Y à %H:%M")
         who = (row.get("contact_name") or "").strip()
-        lead_txt = "dans 15 min" if off["appointment"] in ("15", "15min") else "dans 1 h"
+        if lead_min <= 0:
+            lead_txt = "maintenant"
+        elif lead_min < 60:
+            lead_txt = f"dans {lead_min} min"
+        else:
+            h, m = divmod(lead_min, 60)
+            lead_txt = f"dans {h} h" + (f" {m:02d}" if m else "")
         subject = f"RDV Clarity {lead_txt} : {motif}"
         body = f"{motif}\n\n{heure}" + (f"\nAvec : {who}" if who else "") + "\n\n— Clarity"
         result = send_email(email, subject, body)
@@ -264,18 +276,29 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
         except Exception:
             return {"success": False, "message": "Heure invalide (HH:MM)."}
         patch["digest_time"] = time_s
-    allowed_rem = ("0", "15", "off")
-    allowed_rdv = ("60", "15", "digest", "off")
+    def _norm_offset(val: str) -> Optional[str]:
+        v = str(val or "").strip().lower()
+        if v in ("off", "none", "false"):
+            return "off"
+        if v in ("digest", "brief"):
+            return "digest"
+        try:
+            n = int(v)
+        except Exception:
+            return None
+        if n < 0 or n > 10080:
+            return None
+        return str(n)
     if reminder_offset is not None:
-        reminder_offset = str(reminder_offset).strip()
-        if reminder_offset not in allowed_rem:
+        n = _norm_offset(reminder_offset)
+        if n is None:
             return {"success": False, "message": "reminder_offset invalide"}
-        patch["reminder_offset"] = reminder_offset
+        patch["reminder_offset"] = n
     if appointment_offset is not None:
-        appointment_offset = str(appointment_offset).strip()
-        if appointment_offset not in allowed_rdv:
+        n = _norm_offset(appointment_offset)
+        if n is None:
             return {"success": False, "message": "appointment_offset invalide"}
-        patch["appointment_offset"] = appointment_offset
+        patch["appointment_offset"] = n
     if not patch:
         s = get_digest_settings(user_id)
         return {"success": True, "settings": s, **s}
