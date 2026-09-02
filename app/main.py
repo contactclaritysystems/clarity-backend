@@ -22,6 +22,8 @@ from app.writing_styles import list_styles, create_style
 from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
 from app.notifications import run_notification_pass, send_email, get_digest_settings, save_digest_settings
+from app.tasks import list_tasks, create_task, update_task, delete_task
+from app.contact_activity import get_activity, patch_contact
 
 _NOTIFY_TEST_LAST = {}
 
@@ -333,3 +335,49 @@ async def styles_create(payload: StyleCreatePayload):
         return create_style(payload.user_id, payload.model_dump())
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+
+class TaskPayload(BaseModel):
+    user_id: Optional[str] = None
+    titre: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = None
+    task_id: Optional[str] = None
+
+
+@app.get("/tasks")
+async def tasks_list(user_id: str = ""):
+    return list_tasks(user_id)
+
+
+@app.post("/tasks")
+async def tasks_create(payload: TaskPayload):
+    return create_task(payload.user_id or "", payload.titre or "", payload.due_date)
+
+
+@app.patch("/tasks/{task_id}")
+async def tasks_update(task_id: str, payload: TaskPayload):
+    return update_task(payload.user_id or "", task_id, payload.status, payload.titre)
+
+
+@app.delete("/tasks/{task_id}")
+async def tasks_delete(task_id: str, user_id: str = ""):
+    return delete_task(user_id, task_id)
+
+
+class ContactPatchPayload(BaseModel):
+    user_id: Optional[str] = None
+    tags: Optional[list] = None
+    notes_internes: Optional[str] = None
+
+
+@app.get("/contacts/{contact_id}/activity")
+async def contact_activity(contact_id: str, user_id: str = ""):
+    return get_activity(user_id, contact_id)
+
+
+@app.patch("/contacts/{contact_id}")
+async def contact_patch(contact_id: str, payload: ContactPatchPayload):
+    return patch_contact(payload.user_id or "", contact_id, payload.tags, payload.notes_internes)
+
