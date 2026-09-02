@@ -168,6 +168,17 @@ async def cron_notifications(request: Request):
 
 
 
+
+@app.get("/admin/telegram-test")
+async def admin_telegram_test(request: Request):
+    secret = os.getenv("CRON_SECRET") or ""
+    q = request.query_params.get("secret") or ""
+    if secret and q != secret:
+        return JSONResponse({"ok": False}, status_code=401)
+    from app.admin_alerts import telegram_send
+    ok = telegram_send("🧪 Test Clarity Admin — le canal fonctionne.")
+    return {"ok": ok}
+
 @app.get("/capabilities")
 async def capabilities_list():
     """Liste disponible + bientôt (pour le bouton ? / réglages)."""

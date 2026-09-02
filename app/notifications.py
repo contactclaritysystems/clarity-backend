@@ -501,6 +501,13 @@ def run_notification_pass() -> dict:
     rappels = process_reminders(sb, now, cache, debug)
     rdvs = process_appointments(sb, now, cache, debug)
     digests = process_digests(sb, now, cache, debug)
+    admin = {}
+    try:
+        from app.admin_alerts import process_admin_alerts
+        admin = process_admin_alerts(sb, now, debug)
+    except Exception as e:
+        debug.append(f"admin: {e}")
+        print(f"[Notify] admin: {e}")
     print(f"[Notify] pass {now.isoformat()} rappels={rappels} rdvs={rdvs} debug={debug}")
     return {
         "ok": True,
@@ -508,5 +515,6 @@ def run_notification_pass() -> dict:
         "reminders_sent": rappels,
         "appointments_sent": rdvs,
         "digests_sent": digests,
+        "admin_alerts": admin,
         "debug": debug[-20:],
     }
