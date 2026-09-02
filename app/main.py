@@ -23,7 +23,7 @@ from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
 from app.notifications import run_notification_pass, send_email, get_digest_settings, save_digest_settings
 from app.tasks import list_tasks, create_task, update_task, delete_task
-from app.contact_activity import get_activity, patch_contact
+from app.contact_activity import get_activity, patch_contact, log_sent_mail
 
 _NOTIFY_TEST_LAST = {}
 
@@ -381,3 +381,21 @@ async def contact_activity(contact_id: str, user_id: str = ""):
 async def contact_patch(contact_id: str, payload: ContactPatchPayload):
     return patch_contact(payload.user_id or "", contact_id, payload.tags, payload.notes_internes)
 
+
+
+class SentMailPayload(BaseModel):
+    user_id: Optional[str] = None
+    contact_id: Optional[str] = None
+    to_email: Optional[str] = None
+    subject: Optional[str] = None
+
+
+@app.post("/mails/sent")
+async def mails_sent(payload: SentMailPayload):
+    """Appelé après un envoi réel (dashboard ou Make)."""
+    return log_sent_mail(
+        payload.user_id or "",
+        payload.subject or "",
+        payload.to_email or "",
+        payload.contact_id or "",
+    )

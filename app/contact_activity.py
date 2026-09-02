@@ -74,12 +74,33 @@ def get_activity(user_id: str, contact_id: str) -> dict:
         rappels = rappels[:20]
     except Exception as e:
         print(f"[Contact] rappels: {e}")
+    mails = []
+    email = (contact.get("email") or "").strip().lower()
+    try:
+        rows = (
+            sb.table("sent_mails")
+            .select("id, user_id, contact_id, to_email, subject, sent_at")
+            .eq("user_id", user_id)
+            .order("sent_at", desc=True)
+            .limit(80)
+            .execute()
+            .data
+            or []
+        )
+        for row in rows:
+            if str(row.get("contact_id") or "") == str(contact_id):
+                mails.append(row)
+            elif email and str(row.get("to_email") or "").strip().lower() == email:
+                mails.append(row)
+        mails = mails[:20]
+    except Exception as e:
+        print(f"[Contact] mails: {e}")
     return {
         "success": True,
         "contact": contact,
         "appointments": rdvs,
         "follow_ups": rappels,
-        "mails": [],
+        "mails": mails,
     }
 
 
@@ -105,5 +126,26 @@ def patch_contact(user_id: str, contact_id: str, tags=None, notes_internes=None)
         if not r.data:
             return {"success": False, "message": "sauvegarde bloquée"}
         return {"success": True, "contact": r.data[0]}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+def log_sent_mail(user_id: str, subject: str, to_email: str = "", contact_id: str = "") -> dict:
+    sb = get_supabase()
+    subject = (subject or "").strip() or "(sans objet)"
+    if not sb or not user_id:
+        return {"success": False, "message": "paramètres manquants"}
+    row = {
+        "user_id": user_id,
+        "subject": subject[:200],
+        "to_email": (to_email or "").strip().lower() or None,
+        "contact_id": contact_id or None,
+        "sent_at": datetime.utcnow().isoformat() + "Z",
+    }
+    try:
+        r = sb.table("sent_mails").insert(row).execute()
+        if contact_id:
+            touch_contact(contact_id)
+        return {"success": True, "mail": (r.data or [None])[0]}
     except Exception as e:
         return {"success": False, "message": str(e)}
