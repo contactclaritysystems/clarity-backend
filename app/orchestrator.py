@@ -35,7 +35,8 @@ AGENTS DISPONIBLES
 - "assistant" : questions, conseils, explications, idées, résumés, calculs, aide générale
   (PAS pour « rédige un post », « offre commerciale » seuls → redaction ; mais « message pour Antoine » → mail)
 - "planning" : CRÉER un rendez-vous / réunion (pas consulter l'agenda)
-- "relance" : CRÉER un rappel ("fais-moi penser", "rappelle-moi") — pas lister les rappels existants
+- "relance" : CRÉER un rappel notifié ("fais-moi penser à 8h", "rappelle-moi demain")
+- "taches" : CRÉER une ligne à cocher SANS notification ("ajoute une tâche", "à faire :", "note que je dois", "il faut que je") — ce n'est PAS un rappel
 - Pour CONSULTER agenda / rappels / contacts → "assistant"
 
 ═══════════════════════════════════════
@@ -49,12 +50,16 @@ RÈGLES DE ROUTAGE (dans l'ordre)
      → TOUJOURS "assistant"
    - "planning" UNIQUEMENT pour CRÉER / MODIFIER / ANNULER un rendez-vous
      (ex: "ajoute un RDV", "planifie une réunion", "note un rendez-vous avec…")
-   - "relance" UNIQUEMENT pour CRÉER un rappel
-     (ex: "fais-moi penser", "rappelle-moi de…", "crée un rappel")
+   - "relance" UNIQUEMENT pour CRÉER un rappel AVEC moment
+     (ex: "fais-moi penser demain 8h", "rappelle-moi de…")
+   - "taches" pour une liste à cocher SANS notif
+     (ex: "ajoute une tâche", "à faire : appeler Marc", "note que je dois")
 
 1. Si la demande implique d'ENVOYER, PRÉPARER un email/message À quelqu'un (ex: "message pour Antoine", "dis-lui que...", "préviens Paul") → "mail"
 2. Si c'est CRÉER un rendez-vous / une réunion → "planning"
-3. Si c'est CRÉER un rappel / "fais-moi penser" → "relance"
+3. Si c'est CRÉER un rappel notifié / "fais-moi penser à telle heure" → "relance"
+3b. Si c'est une TÂCHE à cocher ("ajoute une tâche", "à faire", "il faut que je") → "taches"
+    "rappelle-moi" sans "tâche" → relance. "ajoute une tâche" → taches, jamais relance.
 4. Si c'est rédiger SANS destinataire email (post, Insta, LinkedIn, offre, CR, SMS à publier, « message pour Instagram ») → "redaction"
    « message pour Insta / LinkedIn / Facebook / Stories » = REDACTION, jamais mail.
    Mail seulement si un DESTINATAIRE PERSONNE (Antoine, mon patron) ou « envoie un mail ».
@@ -89,7 +94,7 @@ Ne perds aucune information importante (noms, dates, ton, copies…).
 FORMAT DE RÉPONSE (JSON uniquement)
 ═══════════════════════════════════════
 {
-  "agent": "mail" | "assistant" | "redaction" | "planning" | "relance",
+  "agent": "mail" | "assistant" | "redaction" | "planning" | "relance" | "taches",
   "instruction": "instruction claire et complète pour l'agent",
   "confidence": 0.0 à 1.0,
   "secondary_intent": null ou "planning" | "relance" | ...,
@@ -135,7 +140,7 @@ async def run_orchestrator(payload: dict) -> dict:
         data = json.loads(response.choices[0].message.content)
 
         agent = data.get("agent", "assistant")
-        allowed = ("mail", "assistant", "redaction", "planning", "relance")
+        allowed = ("mail", "assistant", "redaction", "planning", "relance", "taches")
         if agent not in allowed:
             agent = "assistant"
 
@@ -165,6 +170,7 @@ async def run_orchestrator(payload: dict) -> dict:
         ]
         redaction_words = ["linkedin", "instagram", "insta", "facebook", "stories", "compte-rendu", "compte rendu", "rédige", "redige", "post", "offre", "annonce", "texte pour le site"]
         planning_create = ["ajoute un rdv", "ajoute un rendez-vous", "planifie", "note un rdv", "prend un rdv", "prends un rdv"]
+        taches_create = ["ajoute une tâche", "ajoute une tache", "nouvelle tâche", "nouvelle tache", "à faire", "a faire :", "il faut que je", "note que je dois"]
         relance_create = ["fais-moi penser", "fais moi penser", "rappelle-moi", "rappelle moi", "crée un rappel", "creer un rappel"]
         question_words = ["qu'est-ce", "quest-ce", "quels", "quelles", "ai-je", "est-ce que", "résume", "resume", "combien", "montre", "liste"]
 
@@ -174,6 +180,8 @@ async def run_orchestrator(payload: dict) -> dict:
             agent = "redaction"
         elif any(w in lower for w in mail_words):
             agent = "mail"
+        elif any(w in lower for w in taches_create):
+            agent = "taches"
         elif any(w in lower for w in relance_create):
             agent = "relance"
         elif any(w in lower for w in planning_create):

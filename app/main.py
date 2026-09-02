@@ -18,6 +18,7 @@ from app.agents.planning_agent import run_planning_agent
 from app.agents.relance_agent import run_relance_agent
 from app.agents.assistant_agent import run_assistant_agent
 from app.agents.redaction_agent import run_redaction_agent
+from app.agents.taches_agent import run_taches_agent
 from app.writing_styles import list_styles, create_style
 from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
@@ -271,6 +272,19 @@ async def relance_agent_endpoint(payload: AgentPayload):
             "request_id": payload.request_id
         }
 
+
+
+@app.post("/agent/taches")
+async def taches_agent_endpoint(payload: AgentPayload):
+    try:
+        return await run_taches_agent(payload.model_dump())
+    except Exception as e:
+        print(f"[TACHES AGENT ERROR] {e}")
+        return {
+            "success": False,
+            "message": "Impossible de noter la tâche.",
+            "request_id": payload.request_id
+        }
 
 
 @app.post("/agent/assistant")
