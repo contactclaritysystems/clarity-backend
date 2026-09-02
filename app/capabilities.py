@@ -35,32 +35,42 @@ COMING_SOON = [
     {
         "key": "devis",
         "label": "Devis",
-        "desc": "Créer et envoyer un devis à partir d’une simple dictée.",
+        "desc": "Préparer un chiffrage rapide à partir d'une simple demande orale.",
     },
     {
         "key": "factures",
-        "label": "Factures",
-        "desc": "Préparer une facture ou une relance de paiement.",
-    },
-    {
-        "key": "chantier",
-        "label": "Agent Chantier",
-        "desc": "Préparer le matériel, la checklist et le compte-rendu d’intervention.",
+        "label": "Facturation",
+        "desc": "Créer, suivre et envoyer vos factures directement depuis Clarity.",
     },
     {
         "key": "documents",
         "label": "Documents",
-        "desc": "Retrouver, classer ou résumer vos documents pro.",
+        "desc": "Retrouver et exploiter vos documents sans avoir à les chercher vous-même.",
+    },
+    {
+        "key": "ocr",
+        "label": "Lecture automatique de documents",
+        "desc": "Prendre une photo d'une facture ou d'un bon de commande, Clarity en extrait les informations utiles.",
     },
     {
         "key": "crm",
-        "label": "Contacts / CRM avancé",
-        "desc": "Suivi client enrichi (historique, relances commerciales).",
+        "label": "Contacts avancés",
+        "desc": "Centraliser toutes les informations de vos clients au même endroit.",
     },
     {
-        "key": "compte_rendu",
-        "label": "Compte rendu",
-        "desc": "Générer un compte-rendu structuré après une réunion ou un chantier.",
+        "key": "taches",
+        "label": "Tâches",
+        "desc": "Suivre ce qu'il reste à faire, tout à la voix (au-delà des rappels déjà disponibles).",
+    },
+    {
+        "key": "recherche",
+        "label": "Recherche et résumés",
+        "desc": "Retrouver rapidement une information ou obtenir une synthèse.",
+    },
+    {
+        "key": "chantier",
+        "label": "Compagnon de chantier",
+        "desc": "Avant une intervention, Clarity vous rappelle le matériel, les documents et les points importants.",
     },
 ]
 
