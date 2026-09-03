@@ -227,7 +227,9 @@ B) Réunion / rendez-vous client
 Règles :
 - Titre court en haut.
 - Sections avec un titre, puis puces rédigées (pas "1. prévoir toles").
-- Ex : "prévoir remplacement de 10 tôles" → "Prévoir le remplacement de 10 tôles."
+- Sous "Matériel à prévoir" : puces SANS le verbe prévoir/acheter (déjà dans le titre).
+  Ex. "14 tôles perforées 1000×2000 mm" / "Deux claviers à code (intérieur et extérieur)".
+- Sous "Travaux à réaliser" : verbe d'action (Remplacer, Poser, Sceller), pas "Prévoir".
 - Pas de "Voici le compte-rendu".
 - Tutoiement ou vouvoiement selon le brief ; par défaut vouvoiement neutre.
 - Si un seul type de points : une seule famille de sections, pas les 6 vides.
