@@ -171,10 +171,33 @@ RÈGLES :
 4. Jamais les codes done / scheduled / pending. Pas "(à venir)" si c'est déjà dit par la date.
 5. Pas de phrase de fin commerciale ("n'hésitez pas", "je reste à votre disposition").
 6. Devis, facture, WhatsApp, agenda Google : dites en 2 phrases que c'est bientôt, sans proposer un faux devis.
+7. DROIT / FISCALITÉ / TRAVAIL / OBLIGATIONS LÉGALES :
+   - Réponse générale et prudente uniquement. Jamais « la loi impose X » comme un verdict.
+   - Terminez TOUJOURS par exactement :
+     « Ceci n'est pas un conseil juridique. Vérifiez auprès d'un professionnel ou sur un site officiel (ex. service-public.fr). »
+   - Pas d'article de loi inventé, pas de montant de cotisation/amende inventé.
 """
 
 
 
+
+
+def is_legal_sensitive(instruction: str) -> bool:
+    t = (instruction or "").lower()
+    keys = [
+        "obligation légale", "obligations légales", "fiscal", "fiscalité", "urssaf",
+        "impôt", "impots", "tva", "droit du travail", "code du travail",
+        "licenciement", "contrat de travail", "affichage des prix", "amende",
+        "conformité", "rgpd", "legal", "juridique", "avocat", "expert-comptable",
+        "cotisation", "charges sociales", "smic", "congés payés", "préavis",
+    ]
+    return any(k in t for k in keys)
+
+
+LEGAL_DISCLAIMER = (
+    "Ceci n'est pas un conseil juridique. Vérifiez auprès d'un professionnel "
+    "ou sur un site officiel (ex. service-public.fr)."
+)
 
 def needs_web_search(instruction: str) -> bool:
     """Questions d'actu / faits externes / culture générale hors Clarity."""
@@ -428,6 +451,9 @@ async def run_assistant_agent(payload: dict) -> dict:
 
         import re
         answer = re.sub(r"\*\*", "", answer)
+        if is_legal_sensitive(instruction):
+            if LEGAL_DISCLAIMER.lower() not in answer.lower():
+                answer = (answer.rstrip() + "\n\n" + LEGAL_DISCLAIMER).strip()
         return {
             "success": True,
             "title": "Clarity",
