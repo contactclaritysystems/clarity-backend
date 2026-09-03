@@ -181,6 +181,10 @@ def answers_to_brief(answers: dict) -> str:
         "destinataire": "Destinataire",
         "contenu": "Contenu",
         "ton": "Ton",
+        "adresse": "Adresse / lieu",
+        "contact": "Contact",
+        "societe": "Société",
+        "points_dictes": "Points dictés",
     }
     parts = []
     for k, v in answers.items():
@@ -200,6 +204,43 @@ def is_rewrite_request(instruction: str) -> bool:
     ]
     return any(k in t for k in keys)
 
+
+
+CR_WRITE_SYSTEM = """Tu es le rédacteur de comptes-rendus de Clarity Systems.
+
+MISSION : transformer des notes orales brutes en un compte-rendu professionnel.
+Tu reformules chaque point en phrase claire (sujet + verbe).
+Tu n'inventes AUCUN matériel, montant, date, nom ou décision absent des notes.
+
+STRUCTURE (choisis celle qui colle au contenu, tu peux en mélanger 2) :
+A) Chantier / devis / intervention
+   - Contexte (sujet, lieu, contact s'ils sont dans le brief)
+   - Matériel à prévoir (achats, fournitures)
+   - Travaux à réaliser
+   - Points de vigilance (seulement s'ils sont dans les notes)
+B) Réunion / rendez-vous client
+   - Contexte
+   - Points abordés
+   - Décisions
+   - Suite à donner (seulement si dite)
+
+Règles :
+- Titre court en haut.
+- Sections avec un titre, puis puces rédigées (pas "1. prévoir toles").
+- Ex : "prévoir remplacement de 10 tôles" → "Prévoir le remplacement de 10 tôles."
+- Pas de "Voici le compte-rendu".
+- Tutoiement ou vouvoiement selon le brief ; par défaut vouvoiement neutre.
+- Si un seul type de points : une seule famille de sections, pas les 6 vides.
+"""
+
+
+def is_compte_rendu(instruction: str, answers: dict | None = None) -> bool:
+    t = (instruction or "").lower()
+    if "compte-rendu" in t or "compte rendu" in t or t.startswith("rédige un compte"):
+        return True
+    if answers and (answers.get("points") or answers.get("points_dictes")):
+        return True
+    return False
 
 WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
 
@@ -222,7 +263,7 @@ Texte final direct, sans "Voici le message…".
 """
 
 
-async def write_text(instruction: str, history: str, user_name: str, brief: str, memory_text: str = "", style_block: str = "") -> str:
+async def write_text(instruction: str, history: str, user_name: str, brief: str, memory_text: str = "", style_block: str = "", compte_rendu: bool = False) -> str:
     today = datetime.now().strftime("%d/%m/%Y")
     user_msg = f"Date : {today}\n"
     if user_name:
@@ -236,16 +277,19 @@ async def write_text(instruction: str, history: str, user_name: str, brief: str,
     if history:
         user_msg += f"\n=== HISTORIQUE ===\n{history}\n"
     user_msg += f"\n=== DEMANDE ===\n{instruction}\n"
-    user_msg += ("\nRédige le message. Forme OK (Salut/Bonjour), mais AUCUNE idée en plus du brief.")
+    if compte_rendu:
+        user_msg += ("\nRédige le compte-rendu structuré. Reformule les points oraux. N'invente rien.")
+    else:
+        user_msg += ("\nRédige le message. Forme OK (Salut/Bonjour), mais AUCUNE idée en plus du brief.")
 
     response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": WRITE_SYSTEM},
+            {"role": "system", "content": CR_WRITE_SYSTEM if compte_rendu else WRITE_SYSTEM},
             {"role": "user", "content": user_msg},
         ],
-        temperature=0.4,
-        max_tokens=1200,
+        temperature=0.35,
+        max_tokens=1600 if compte_rendu else 1200,
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -253,6 +297,8 @@ async def write_text(instruction: str, history: str, user_name: str, brief: str,
 def has_enough_in_instruction(instruction: str) -> bool:
     """Demande déjà assez riche → pas de formulaire."""
     t = (instruction or "").lower()
+    if is_compte_rendu(instruction) and len(instruction) > 80:
+        return True
     if len(t) < 50:
         return False
     signals = sum(
@@ -317,7 +363,9 @@ async def run_redaction_agent(payload: dict) -> dict:
                 brief=brief,
                 memory_text=memory_text,
                 style_block=style_block,
+                compte_rendu=is_compte_rendu(base_instruction, form_answers),
             )
+            title_out = "Compte-rendu" if is_compte_rendu(base_instruction, form_answers) else "Rédaction"
             if not text_out:
                 return {
                     "success": False,
@@ -327,7 +375,7 @@ async def run_redaction_agent(payload: dict) -> dict:
             await extract_and_save_memory(user_id, base_instruction, text_out, history + "\n" + brief)
             return {
                 "success": True,
-                "title": "Rédaction",
+                "title": title_out,
                 "message": text_out,
                 "content": text_out,
                 "brief": brief,
