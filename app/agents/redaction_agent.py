@@ -413,10 +413,19 @@ def _detect_cr_family(blob: str) -> str | None:
 
 
 CHECKLIST_CHANTIER = [
+    {
+        "id": "motorisation",
+        "label": "Faut-il prévoir une motorisation ?",
+        "followups_if_oui": [
+            {"id": "moteur_depose", "label": "Y a-t-il une motorisation existante à déposer ?"},
+            {"id": "cellules", "label": "Faut-il poser des cellules de sécurité ?"},
+            {"id": "gyrophare", "label": "Faut-il poser un gyrophare ?"},
+            {"id": "elec", "label": "L'électricité est-elle déjà tirée jusqu'au portail ?"},
+        ],
+    },
     {"id": "acces", "label": "Faut-il prévoir un accès camion ou un stationnement particulier ?"},
     {"id": "fini", "label": "Y a-t-il une finition à prévoir (peinture, habillage, nettoyage) ?"},
     {"id": "secu", "label": "Un point de sécurité ou de voisinage est-il à noter ?"},
-    {"id": "commande", "label": "Du matériel reste-t-il à commander avant l'intervention ?"},
 ]
 CHECKLIST_REUNION = [
     {"id": "decision", "label": "Une décision a-t-elle été prise aujourd'hui ?"},
@@ -434,11 +443,21 @@ def generate_cr_checklist(instruction: str, answers: dict) -> list:
         return []
     raw = CHECKLIST_CHANTIER if kind == "chantier" else CHECKLIST_REUNION
     said = _tokens(blob)
+    motor_already = any(w in blob for w in ("moteur", "motoris", "automatique"))
     out = []
     for it in raw:
-        if _overlaps_said(it["label"], said):
+        kids = list(it.get("followups_if_oui") or [])
+        kids = [k for k in kids if not _overlaps_said(k["label"], said)]
+        if it["id"] == "motorisation" and motor_already:
+            out.extend(kids)
             continue
-        out.append(it)
+        if _overlaps_said(it["label"], said):
+            out.extend(kids)
+            continue
+        row = {"id": it["id"], "label": it["label"]}
+        if kids:
+            row["followups_if_oui"] = kids
+        out.append(row)
     return out
 
 
