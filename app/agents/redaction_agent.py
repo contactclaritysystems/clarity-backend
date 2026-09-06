@@ -185,10 +185,38 @@ def answers_to_brief(answers: dict) -> str:
         "contact": "Contact",
         "societe": "Société",
         "points_dictes": "Points dictés",
+        "photo_urls": "Photos",
+        "checklist_oui": "Points confirmés (checklist)",
+        "checklist_non": "Points écartés",
     }
+    label_by_id = {}
+    for it in answers.get("checklist_items") or []:
+        if isinstance(it, dict) and it.get("id"):
+            label_by_id[str(it["id"])] = it.get("label") or it["id"]
     parts = []
+    raw_chk = answers.get("checklist_answers")
+    if isinstance(raw_chk, dict):
+        oui, non = [], []
+        for kid, val in raw_chk.items():
+            lab = label_by_id.get(str(kid), str(kid))
+            lv = str(val).lower()
+            if lv in ("oui", "yes", "true", "1"):
+                oui.append(lab)
+            elif lv in ("non", "no", "false", "0"):
+                non.append(lab)
+        if oui:
+            parts.append("Confirmé (checklist) : " + " ; ".join(oui))
+        if non:
+            parts.append("Écarté (ne pas écrire) : " + " ; ".join(non))
     for k, v in answers.items():
-        v = (v or "").strip()
+        if k in ("checklist_answers", "checklist_items", "photos", "checklist_done"):
+            continue
+        if isinstance(v, list):
+            v = ", ".join(str(x) for x in v if x)
+        elif isinstance(v, dict):
+            continue
+        else:
+            v = str(v or "").strip()
         if not v:
             continue
         parts.append(f"{labels.get(k, k)} : {v}")
@@ -210,7 +238,7 @@ CR_WRITE_SYSTEM = """Tu es le rédacteur de comptes-rendus de Clarity Systems.
 
 MISSION : transformer des notes orales brutes en un compte-rendu professionnel.
 Tu reformules chaque point en phrase claire (sujet + verbe).
-Tu n'inventes AUCUN matériel, montant, date, nom ou décision absent des notes.
+Tu n'inventes AUCUN matériel, montant, date, nom ou décision absent des notes.\nChecklist : n'écris QUE les points Confirmé. Ignore les Écarté.\nS'il y a des Photos listées, ne décris pas ce qu'elles montrent (pas d'analyse).
 
 STRUCTURE (choisis celle qui colle au contenu, tu peux en mélanger 2) :
 A) Chantier / devis / intervention
@@ -315,6 +343,50 @@ def has_enough_in_instruction(instruction: str) -> bool:
     return signals >= 2
 
 
+def generate_cr_checklist(instruction: str, answers: dict) -> list:
+    """6–8 cases oui/non adaptées au type (chantier vs réunion)."""
+    brief = f"{instruction}\n{answers_to_brief(answers)}"
+    try:
+        resp = get_client().chat.completions.create(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Tu prépares une check-list COURTE pour un compte-rendu Clarity.\n"
+                        "JSON : {\"kind\": \"chantier\"|\"reunion\"|\"autre\", "
+                        "\"items\": [{\"id\": \"moteur\", \"label\": \"Portail motorisé ?\"}]}\n"
+                        "6 à 8 items max. Questions concrètes, mots simples.\n"
+                        "Chantier : matériel, travaux, état (peinture, moteur…).\n"
+                        "Réunion : décisions, prochain RDV, devis, qui fait quoi.\n"
+                        "N'invente pas un métier hors sujet. Pas de questions juridiques."
+                    ),
+                },
+                {"role": "user", "content": brief[:2500]},
+            ],
+            temperature=0.2,
+            max_tokens=400,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content)
+        items = data.get("items") or []
+        out = []
+        for i, it in enumerate(items[:8]):
+            lab = (it.get("label") or "").strip()
+            if not lab:
+                continue
+            oid = (it.get("id") or f"q{i+1}").strip()
+            out.append({"id": oid, "label": lab})
+        if out:
+            return out
+    except Exception as e:
+        print(f"[Redaction] checklist: {e}")
+    return [
+        {"id": "contexte_ok", "label": "Le sujet est-il complet ?"},
+        {"id": "suite", "label": "Y a-t-il une suite à donner ?"},
+    ]
+
+
 async def run_redaction_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
@@ -350,6 +422,23 @@ async def run_redaction_agent(payload: dict) -> dict:
         ):
             brief = answers_to_brief(form_answers)
             base_instruction = instruction or payload.get("original_instruction") or "Rédige le texte demandé."
+            cr = is_compte_rendu(base_instruction, form_answers)
+            done = form_answers.get("checklist_done") or form_answers.get("checklist_answers")
+            if cr and not done:
+                items = generate_cr_checklist(base_instruction, form_answers)
+                return {
+                    "success": False,
+                    "reason": "needs_checklist",
+                    "ui": "checklist",
+                    "title": "Pour ne rien oublier",
+                    "message": "Cochez ce qui est vrai. Laissez vide si vous ne savez pas.",
+                    "items": items,
+                    "photos_allowed": True,
+                    "max_photos": 3,
+                    "form_answers": form_answers,
+                    "original_instruction": base_instruction,
+                    "request_id": request_id,
+                }
             sk = (
                 form_answers.get("style_key")
                 or payload.get("style_key")
@@ -375,12 +464,16 @@ async def run_redaction_agent(payload: dict) -> dict:
                     "request_id": request_id,
                 }
             await extract_and_save_memory(user_id, base_instruction, text_out, history + "\n" + brief)
+            photos = form_answers.get("photo_urls") or form_answers.get("photos") or []
+            if isinstance(photos, str):
+                photos = [photos]
             return {
                 "success": True,
                 "title": title_out,
                 "message": text_out,
                 "content": text_out,
                 "brief": brief,
+                "photo_urls": [u for u in photos if u],
                 "request_id": request_id,
             }
 
@@ -402,8 +495,24 @@ async def run_redaction_agent(payload: dict) -> dict:
 
         # --- Déjà assez d'infos dans la phrase ---
         if has_enough_in_instruction(instruction):
+            if is_compte_rendu(instruction) and not (form_answers or {}).get("checklist_answers"):
+                items = generate_cr_checklist(instruction, form_answers or {})
+                return {
+                    "success": False,
+                    "reason": "needs_checklist",
+                    "ui": "checklist",
+                    "title": "Pour ne rien oublier",
+                    "message": "Cochez ce qui est vrai. Laissez vide si vous ne savez pas.",
+                    "items": items,
+                    "photos_allowed": True,
+                    "max_photos": 3,
+                    "form_answers": form_answers or {},
+                    "original_instruction": instruction,
+                    "request_id": request_id,
+                }
             text_out = await write_text(
-                instruction, history, user_name, brief=instruction, memory_text=memory_text
+                instruction, history, user_name, brief=instruction, memory_text=memory_text,
+                compte_rendu=is_compte_rendu(instruction),
             )
             if not text_out:
                 return {
