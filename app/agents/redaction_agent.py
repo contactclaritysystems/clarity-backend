@@ -343,9 +343,37 @@ def has_enough_in_instruction(instruction: str) -> bool:
     return signals >= 2
 
 
+def _already_said_blob(instruction: str, answers: dict) -> str:
+    bits = [instruction or ""]
+    if isinstance(answers, dict):
+        for k in ("sujet", "points", "points_dictes", "details", "decisions"):
+            bits.append(str(answers.get(k) or ""))
+    return " ".join(bits).lower()
+
+
+def _tokens(text: str) -> set:
+    import re
+    stop = {
+        "le", "la", "les", "un", "une", "des", "de", "du", "et", "ou", "a", "à",
+        "au", "aux", "en", "pour", "pas", "est", "sont", "avec", "sur", "dans",
+        "ce", "cette", "que", "qui", "il", "on", "je", "nous", "vous", "y",
+        "d", "l", "n", "s", "qu", "du",
+    }
+    words = re.findall(r"[a-zàâäéèêëïîôùûüç0-9]+", (text or "").lower())
+    return {w for w in words if len(w) >= 4 and w not in stop}
+
+
+def _overlaps_said(label: str, said: set) -> bool:
+    toks = _tokens(label)
+    if not toks or not said:
+        return False
+    return len(toks & said) >= 2 or any(w in said and len(w) >= 5 for w in toks)
+
+
 def generate_cr_checklist(instruction: str, answers: dict) -> list:
-    """6–8 cases oui/non adaptées au type (chantier vs réunion)."""
+    """Questions EN PLUS, oui/non clairs, pas de recopie des points."""
     brief = f"{instruction}\n{answers_to_brief(answers)}"
+    said = _tokens(_already_said_blob(instruction, answers))
     try:
         resp = get_client().chat.completions.create(
             model=MODEL,
@@ -353,38 +381,55 @@ def generate_cr_checklist(instruction: str, answers: dict) -> list:
                 {
                     "role": "system",
                     "content": (
-                        "Tu prépares une check-list COURTE pour un compte-rendu Clarity.\n"
+                        "Check-list COMPLÉMENTAIRE d'un compte-rendu artisan / réunion.\n"
                         "JSON : {\"kind\": \"chantier\"|\"reunion\"|\"autre\", "
-                        "\"items\": [{\"id\": \"moteur\", \"label\": \"Portail motorisé ?\"}]}\n"
-                        "6 à 8 items max. Questions concrètes, mots simples.\n"
-                        "Chantier : matériel, travaux, état (peinture, moteur…).\n"
-                        "Réunion : décisions, prochain RDV, devis, qui fait quoi.\n"
-                        "N'invente pas un métier hors sujet. Pas de questions juridiques."
+                        "\"items\": [{\"id\": \"rails\", \"label\": \"Les rails sont-ils à reprendre ?\"}]}\n"
+                        "RÈGLES STRICTES :\n"
+                        "- 4 à 6 questions MAX.\n"
+                        "- Chaque label est une VRAIE question oui/non (verbe + objet).\n"
+                        "- INTERDIT de reformuler un point déjà écrit (si on a dit « 3 barreaux à remplacer » "
+                        "ne pas demander « Barreaux à remplacer ? »).\n"
+                        "- INTERDIT : « État de… », « Quid de… », questions vagues.\n"
+                        "- INTERDIT sauf si clairement dans le sujet : devis reçu, date de fin, facture, "
+                        "délai administratif.\n"
+                        "- Chantier portail : penser à ce qui MANQUE souvent "
+                        "(rails, butées, télécommandes, clavier, cellules, peinture des piliers, accès camion).\n"
+                        "- Réunion : qui fait quoi, prochain appel, document à envoyer — seulement si absent des notes.\n"
+                        "- Mots simples, sérieux, vouvoiement."
                     ),
                 },
-                {"role": "user", "content": brief[:2500]},
+                {"role": "user", "content": "Déjà dit (NE PAS redemander) :\n" + brief[:2200]},
             ],
-            temperature=0.2,
-            max_tokens=400,
+            temperature=0.15,
+            max_tokens=350,
             response_format={"type": "json_object"},
         )
         data = json.loads(resp.choices[0].message.content)
         items = data.get("items") or []
         out = []
+        vague = ("état de", "etat de", "quid", "à noter", "a noter")
         for i, it in enumerate(items[:8]):
             lab = (it.get("label") or "").strip()
             if not lab:
                 continue
+            low = lab.lower()
+            if any(v in low for v in vague):
+                continue
+            if _overlaps_said(lab, said):
+                continue
+            if not lab.endswith("?"):
+                lab = lab.rstrip(".") + " ?"
             oid = (it.get("id") or f"q{i+1}").strip()
             out.append({"id": oid, "label": lab})
-        if out:
-            return out
+        if len(out) >= 3:
+            return out[:6]
     except Exception as e:
         print(f"[Redaction] checklist: {e}")
     return [
-        {"id": "contexte_ok", "label": "Le sujet est-il complet ?"},
-        {"id": "suite", "label": "Y a-t-il une suite à donner ?"},
+        {"id": "acces", "label": "Faut-il prévoir un accès camion ou une zone de stockage ?"},
+        {"id": "securite", "label": "Y a-t-il un point de sécurité à mentionner ?"},
     ]
+
 
 
 async def run_redaction_agent(payload: dict) -> dict:
