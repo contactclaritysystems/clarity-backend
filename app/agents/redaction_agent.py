@@ -320,6 +320,15 @@ PACKS = {
             "id": "moteur",
             "label": "Y a-t-il un moteur ?",
             "type": "oui_non",
+            "followups_if_oui": [
+                {"id": "moteur_existant", "label": "Faut-il déposer le moteur actuel ?", "type": "oui_non"},
+                {
+                    "id": "longueur_portail",
+                    "label": "Longueur du vantail (crémaillère) ?",
+                    "type": "texte",
+                    "placeholder": "Ex : 4 m",
+                },
+            ],
         },
         {
             "id": "poncage_peinture",
