@@ -322,8 +322,7 @@ CHECKLIST_CHANTIER = [
         "label": "Faut-il reprendre la peinture ou un coup de propre ?",
         "type": "oui_non",
         "followups_if_oui": [
-            {"id": "peinture_faces", "label": "Les deux faces du portail sont-elles concernées ?", "type": "oui_non"},
-            {"id": "peinture_piliers", "label": "Les piliers ou le cadre aussi ?", "type": "oui_non"},
+            {"id": "peinture_faces", "label": "Les deux faces sont-elles à peindre ?", "type": "oui_non"},
         ],
     },
     {
