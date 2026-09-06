@@ -414,18 +414,39 @@ def _detect_cr_family(blob: str) -> str | None:
 
 CHECKLIST_CHANTIER = [
     {
+        "id": "peinture",
+        "label": "Faut-il reprendre la peinture ou un coup de propre ?",
+        "followups_if_oui": [
+            {"id": "peinture_faces", "label": "Les deux faces du portail sont-elles concernées ?"},
+            {"id": "peinture_piliers", "label": "Les piliers ou le cadre aussi ?"},
+        ],
+    },
+    {
+        "id": "pieces",
+        "label": "Y a-t-il des pièces à remplacer, ou seulement un réglage / graissage ?",
+        "followups_if_oui": [
+            {"id": "pieces_lesquelles", "label": "Pouvez-vous dicter lesquelles (tôles, barreaux, galets…) ?"},
+        ],
+    },
+    {
         "id": "motorisation",
         "label": "Faut-il prévoir une motorisation ?",
         "followups_if_oui": [
-            {"id": "moteur_depose", "label": "Y a-t-il une motorisation existante à déposer ?"},
-            {"id": "cellules", "label": "Faut-il poser des cellules de sécurité ?"},
-            {"id": "gyrophare", "label": "Faut-il poser un gyrophare ?"},
-            {"id": "elec", "label": "L'électricité est-elle déjà tirée jusqu'au portail ?"},
+            {
+                "id": "moteur_en_place",
+                "label": "Une motorisation est-elle déjà en place ?",
+                "followups_if_oui": [
+                    {"id": "reutiliser_elec", "label": "Peut-on réutiliser l'électricité existante ?"},
+                    {"id": "reutiliser_cellules", "label": "Peut-on garder les cellules ?"},
+                    {"id": "reutiliser_gyro", "label": "Peut-on garder le gyrophare ?"},
+                ],
+                "followups_if_non": [
+                    {"id": "tranchee", "label": "Faut-il prévoir une tranchée pour le câble électrique ?"},
+                    {"id": "saignees", "label": "Faut-il des saignées dans les poteaux pour cellules ou gyrophare ?"},
+                ],
+            },
         ],
     },
-    {"id": "acces", "label": "Faut-il prévoir un accès camion ou un stationnement particulier ?"},
-    {"id": "fini", "label": "Y a-t-il une finition à prévoir (peinture, habillage, nettoyage) ?"},
-    {"id": "secu", "label": "Un point de sécurité ou de voisinage est-il à noter ?"},
 ]
 CHECKLIST_REUNION = [
     {"id": "decision", "label": "Une décision a-t-elle été prise aujourd'hui ?"},
@@ -435,8 +456,23 @@ CHECKLIST_REUNION = [
 ]
 
 
+def _prune_item(it: dict, said: set) -> dict | None:
+    if _overlaps_said(it.get("label") or "", said):
+        return None
+    row = {"id": it["id"], "label": it["label"]}
+    oui = [_prune_item(k, said) for k in (it.get("followups_if_oui") or [])]
+    non = [_prune_item(k, said) for k in (it.get("followups_if_non") or [])]
+    oui = [k for k in oui if k]
+    non = [k for k in non if k]
+    if oui:
+        row["followups_if_oui"] = oui
+    if non:
+        row["followups_if_non"] = non
+    return row
+
+
 def generate_cr_checklist(instruction: str, answers: dict) -> list:
-    """Listes fixes. Rien si le type n'est pas clair. Pas de GPT."""
+    """Arbre fixe. Rien si le type n'est pas clair. Pas de GPT."""
     blob = _already_said_blob(instruction, answers)
     kind = _detect_cr_family(blob)
     if not kind:
@@ -444,21 +480,19 @@ def generate_cr_checklist(instruction: str, answers: dict) -> list:
     raw = CHECKLIST_CHANTIER if kind == "chantier" else CHECKLIST_REUNION
     said = _tokens(blob)
     motor_already = any(w in blob for w in ("moteur", "motoris", "automatique"))
-    out = []
+    items = []
     for it in raw:
-        kids = list(it.get("followups_if_oui") or [])
-        kids = [k for k in kids if not _overlaps_said(k["label"], said)]
-        if it["id"] == "motorisation" and motor_already:
-            out.extend(kids)
+        if it.get("id") == "motorisation" and motor_already:
+            nested = (it.get("followups_if_oui") or [None])[0]
+            if nested:
+                pruned = _prune_item(nested, said)
+                if pruned:
+                    items.append(pruned)
             continue
-        if _overlaps_said(it["label"], said):
-            out.extend(kids)
-            continue
-        row = {"id": it["id"], "label": it["label"]}
-        if kids:
-            row["followups_if_oui"] = kids
-        out.append(row)
-    return out
+        pruned = _prune_item(it, said)
+        if pruned:
+            items.append(pruned)
+    return items
 
 
 
