@@ -389,82 +389,57 @@ def checklist_context_ready(instruction: str, answers: dict) -> bool:
     return True
 
 
+CHANTIER_KEYS = (
+    "portail", "portail", "cloture", "clôture", "toit", "toiture", "tuile",
+    "peinture", "enduit", "facade", "façade", "chantier", "pose", "depannage",
+    "dépannage", "remplacement", "moteur", "portail", "fenetre", "fenêtre",
+    "volets", "carrelage", "plomb", "elec", "élec",
+)
+REUNION_KEYS = (
+    "reunion", "réunion", "rdv", "rendez-vous", "point client", "devis oral",
+    "visite", "compte client", "commercial",
+)
+
+
+def _detect_cr_family(blob: str) -> str | None:
+    t = (blob or "").lower()
+    if any(k in t for k in REUNION_KEYS) and not any(k in t for k in ("portail", "toit", "peinture", "moteur")):
+        return "reunion"
+    if any(k in t for k in CHANTIER_KEYS):
+        return "chantier"
+    if any(k in t for k in REUNION_KEYS):
+        return "reunion"
+    return None
+
+
+CHECKLIST_CHANTIER = [
+    {"id": "acces", "label": "Faut-il prévoir un accès camion ou un stationnement particulier ?"},
+    {"id": "fini", "label": "Y a-t-il une finition à prévoir (peinture, habillage, nettoyage) ?"},
+    {"id": "secu", "label": "Un point de sécurité ou de voisinage est-il à noter ?"},
+    {"id": "commande", "label": "Du matériel reste-t-il à commander avant l'intervention ?"},
+]
+CHECKLIST_REUNION = [
+    {"id": "decision", "label": "Une décision a-t-elle été prise aujourd'hui ?"},
+    {"id": "relance", "label": "Faut-il rappeler quelqu'un après cet échange ?"},
+    {"id": "doc", "label": "Un document (devis, mail, photos) est-il à envoyer ?"},
+    {"id": "suite", "label": "Une date de suite a-t-elle été fixée ?"},
+]
+
+
 def generate_cr_checklist(instruction: str, answers: dict) -> list:
-    """Questions EN PLUS, oui/non clairs, pas de recopie des points."""
-    if not checklist_context_ready(instruction, answers):
+    """Listes fixes. Rien si le type n'est pas clair. Pas de GPT."""
+    blob = _already_said_blob(instruction, answers)
+    kind = _detect_cr_family(blob)
+    if not kind:
         return []
-    brief = f"{instruction}\n{answers_to_brief(answers)}"
-    said = _tokens(_already_said_blob(instruction, answers))
-    try:
-        resp = get_client().chat.completions.create(
-            model=MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Check-list COMPLÉMENTAIRE d'un compte-rendu artisan / réunion.\n"
-                        "JSON : {\"kind\": \"chantier\"|\"reunion\"|\"autre\", "
-                        "\"items\": [{\"id\": \"rails\", \"label\": \"Les rails sont-ils à reprendre ?\"}]}\n"
-                        "RÈGLES STRICTES :\n"
-                        "- 4 à 6 questions MAX.\n"
-                        "- Chaque label est une VRAIE question oui/non (verbe + objet).\n"
-                        "- INTERDIT de reformuler un point déjà écrit (si on a dit « 3 barreaux à remplacer » "
-                        "ne pas demander « Barreaux à remplacer ? »).\n"
-                        "- INTERDIT : « État de… », « Quid de… », questions vagues.\n"
-                        "- INTERDIT sauf si clairement dans le sujet : devis reçu, date de fin, facture, "
-                        "délai administratif.\n"
-                        "- Parle d'abord de l'objet du sujet (portail = vantaux, cadre, tôles, "
-                        "barreaux, soudures, rouille, peinture du vantail, alignement).\n"
-                        "- Motorisation (moteur, télécommandes, cellules, butées, rails) "
-                        "UNIQUEMENT si le texte parle déjà de moteur / motorisé / automatique.\n"
-                        "- Réunion : qui fait quoi, prochain appel, document à envoyer — seulement si absent des notes.\n"
-                        "- Mots simples, sérieux, vouvoiement."
-                    ),
-                },
-                {"role": "user", "content": "Déjà dit (NE PAS redemander) :\n" + brief[:2200]},
-            ],
-            temperature=0.15,
-            max_tokens=350,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content)
-        items = data.get("items") or []
-        out = []
-        vague = ("état de", "etat de", "quid", "à noter", "a noter")
-        for i, it in enumerate(items[:8]):
-            lab = (it.get("label") or "").strip()
-            if not lab:
-                continue
-            low = lab.lower()
-            if any(v in low for v in vague):
-                continue
-            if _overlaps_said(lab, said):
-                continue
-            motor_hint = any(
-                w in _already_said_blob(instruction, answers)
-                for w in ("moteur", "motoris", "automatique", "telecommande", "télécommande")
-            )
-            motor_q = any(
-                w in low
-                for w in (
-                    "télécommande", "telecommande", "photocell", "cellule",
-                    "butée", "butee", "clavier", "motoris",
-                )
-            )
-            if motor_q and not motor_hint:
-                continue
-            if not lab.endswith("?"):
-                lab = lab.rstrip(".") + " ?"
-            oid = (it.get("id") or f"q{i+1}").strip()
-            out.append({"id": oid, "label": lab})
-        if len(out) >= 3:
-            return out[:6]
-    except Exception as e:
-        print(f"[Redaction] checklist: {e}")
-    return [
-        {"id": "acces", "label": "Faut-il prévoir un accès camion ou une zone de stockage ?"},
-        {"id": "securite", "label": "Y a-t-il un point de sécurité à mentionner ?"},
-    ]
+    raw = CHECKLIST_CHANTIER if kind == "chantier" else CHECKLIST_REUNION
+    said = _tokens(blob)
+    out = []
+    for it in raw:
+        if _overlaps_said(it["label"], said):
+            continue
+        out.append(it)
+    return out
 
 
 
