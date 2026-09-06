@@ -370,8 +370,29 @@ def _overlaps_said(label: str, said: set) -> bool:
     return len(toks & said) >= 2 or any(w in said and len(w) >= 5 for w in toks)
 
 
+def checklist_context_ready(instruction: str, answers: dict) -> bool:
+    """Pas de liste tant que le sujet est trop vague et qu'il n'y a aucun point."""
+    sujet = ""
+    points = ""
+    if isinstance(answers, dict):
+        sujet = str(answers.get("sujet") or "")
+        points = str(answers.get("points") or answers.get("points_dictes") or "")
+    blob = f"{instruction or ''} {sujet} {points}".lower()
+    words = [w for w in blob.replace("'", " ").split() if len(w) > 2]
+    if len(points.strip()) >= 8:
+        return True
+    if len(words) < 4:
+        return False
+    core = (sujet.strip() or instruction or "").lower()
+    if core.startswith("remise en") and "portail" not in blob and "toit" not in blob:
+        return False
+    return True
+
+
 def generate_cr_checklist(instruction: str, answers: dict) -> list:
     """Questions EN PLUS, oui/non clairs, pas de recopie des points."""
+    if not checklist_context_ready(instruction, answers):
+        return []
     brief = f"{instruction}\n{answers_to_brief(answers)}"
     said = _tokens(_already_said_blob(instruction, answers))
     try:
