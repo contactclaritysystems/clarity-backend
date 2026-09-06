@@ -197,6 +197,21 @@ def is_rewrite_request(instruction: str) -> bool:
 
 CR_WRITE_SYSTEM = """Tu es le rédacteur de comptes-rendus de Clarity Systems.
 
+Tu n'utilises QUE le brief et la demande de CE tour.
+INTERDIT : ressortir un ancien chantier (cotes, kg, nombre de toles, couleur)
+si ce n'est pas ecrit dans le brief.
+INTERDIT d'inventer un diametre, un poids, une couleur, une quantite.
+
+Un SEUL plan, celui qui colle :
+- Chantier : titre, travaux / materiaux UNIQUEMENT cites, suite si dite.
+- Reunion : seulement si le brief parle d'une reunion.
+JAMAIS les deux plans A) et B) dans le meme texte.
+Pas de phrase "aucune decision" / "aucune suite" : tu omets la section.
+Titre court. Pas de "Voici le compte-rendu".
+"""
+
+WRITE_SYSTEM = """Tu es le rédacteur de comptes-rendus de Clarity Systems.
+
 MISSION : transformer des notes orales brutes en un compte-rendu professionnel.
 Tu reformules chaque point en phrase claire.
 Tu n'inventes AUCUN matériel, montant, date, nom ou décision absent des notes.
@@ -470,16 +485,17 @@ async def run_redaction_agent(payload: dict) -> dict:
             style = get_style(user_id, style_key=sk or None, style_id=sid or None) if user_id else None
             text_out = await write_text(
                 base_instruction,
-                history,
+                "" if cr else history,
                 user_name,
                 brief=brief,
-                memory_text=memory_text,
-                style_block=style_prompt_block(style),
+                memory_text="" if cr else memory_text,
+                style_block="" if cr else style_prompt_block(style),
                 compte_rendu=cr,
             )
             if not text_out:
                 return {"success": False, "message": "Je n'ai pas pu générer le texte.", "request_id": request_id}
-            await extract_and_save_memory(user_id, base_instruction, text_out, history + "\n" + brief)
+            if not cr:
+                await extract_and_save_memory(user_id, base_instruction, text_out, history + "\n" + brief)
             photos = form_answers.get("photo_urls") or form_answers.get("photos") or []
             if isinstance(photos, str):
                 photos = [photos]
