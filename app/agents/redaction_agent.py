@@ -392,8 +392,10 @@ def generate_cr_checklist(instruction: str, answers: dict) -> list:
                         "- INTERDIT : « État de… », « Quid de… », questions vagues.\n"
                         "- INTERDIT sauf si clairement dans le sujet : devis reçu, date de fin, facture, "
                         "délai administratif.\n"
-                        "- Chantier portail : penser à ce qui MANQUE souvent "
-                        "(rails, butées, télécommandes, clavier, cellules, peinture des piliers, accès camion).\n"
+                        "- Parle d'abord de l'objet du sujet (portail = vantaux, cadre, tôles, "
+                        "barreaux, soudures, rouille, peinture du vantail, alignement).\n"
+                        "- Motorisation (moteur, télécommandes, cellules, butées, rails) "
+                        "UNIQUEMENT si le texte parle déjà de moteur / motorisé / automatique.\n"
                         "- Réunion : qui fait quoi, prochain appel, document à envoyer — seulement si absent des notes.\n"
                         "- Mots simples, sérieux, vouvoiement."
                     ),
@@ -416,6 +418,19 @@ def generate_cr_checklist(instruction: str, answers: dict) -> list:
             if any(v in low for v in vague):
                 continue
             if _overlaps_said(lab, said):
+                continue
+            motor_hint = any(
+                w in _already_said_blob(instruction, answers)
+                for w in ("moteur", "motoris", "automatique", "telecommande", "télécommande")
+            )
+            motor_q = any(
+                w in low
+                for w in (
+                    "télécommande", "telecommande", "photocell", "cellule",
+                    "butée", "butee", "clavier", "motoris",
+                )
+            )
+            if motor_q and not motor_hint:
                 continue
             if not lab.endswith("?"):
                 lab = lab.rstrip(".") + " ?"
