@@ -293,101 +293,81 @@ def _overlaps_said(label: str, said: set) -> bool:
     return len(toks & said) >= 2 or any(w in said and len(w) >= 5 for w in toks)
 
 
-CHANTIER_KEYS = (
-    "portail", "cloture", "clôture", "toit", "toiture", "tuile",
-    "peinture", "enduit", "facade", "façade", "chantier", "pose",
-    "depannage", "dépannage", "remplacement", "moteur", "fenetre",
-    "fenêtre", "volets", "carrelage",
-)
-REUNION_KEYS = (
-    "reunion", "réunion", "rdv", "rendez-vous", "point client",
-    "devis oral", "visite", "commercial",
-)
+PACKS = {
+    "portail": [
+        {
+            "id": "type_portail",
+            "label": "Coulissant ou battant ?",
+            "type": "texte",
+            "placeholder": "coulissant / battant",
+        },
+        {
+            "id": "moteur",
+            "label": "Y a-t-il un moteur ?",
+            "type": "oui_non",
+        },
+        {
+            "id": "poncage_peinture",
+            "label": "Faut-il poncer et peindre ?",
+            "type": "oui_non",
+        },
+        {
+            "id": "elements",
+            "label": "Des éléments à changer ou à ajouter ?",
+            "type": "oui_non",
+            "followups_if_oui": [
+                {
+                    "id": "elements_liste",
+                    "label": "Lesquels ?",
+                    "type": "texte",
+                    "placeholder": "Ex : tôles, galets, moteur",
+                },
+            ],
+        },
+    ],
+    "sdb": [
+        {"id": "depose", "label": "Faut-il déposer l'existant ?", "type": "oui_non"},
+        {
+            "id": "depose_quoi",
+            "label": "Dépose : douche, baignoire, lavabo, bidet, carrelage ?",
+            "type": "texte",
+            "placeholder": "Ex : baignoire + carrelage",
+        },
+        {
+            "id": "repose_quoi",
+            "label": "Pose : douche, baignoire, lavabo, carrelage ?",
+            "type": "texte",
+            "placeholder": "Ex : douche + carrelage",
+        },
+        {"id": "colle_carreaux", "label": "Prévoir colle et carreaux ?", "type": "oui_non"},
+        {"id": "seche_serviette", "label": "Sèche-serviettes à prévoir ?", "type": "oui_non"},
+    ],
+    "peinture": [
+        {"id": "inter_exter", "label": "Intérieur ou extérieur ?", "type": "texte", "placeholder": "intérieur / extérieur"},
+        {"id": "poncage", "label": "Faut-il poncer ?", "type": "oui_non"},
+        {"id": "sous_couche", "label": "Sous-couche à prévoir ?", "type": "oui_non"},
+        {"id": "nombre_couches", "label": "Combien de couches ?", "type": "texte", "placeholder": "Ex : 2"},
+    ],
+    "reunion": [
+        {"id": "decision", "label": "Une décision a-t-elle été prise ?", "type": "oui_non"},
+        {"id": "relance", "label": "Faut-il rappeler quelqu'un ?", "type": "oui_non"},
+        {"id": "doc", "label": "Un document à envoyer ?", "type": "oui_non"},
+        {"id": "suite", "label": "Une date de suite ?", "type": "oui_non"},
+    ],
+}
 
 
 def _detect_cr_family(blob: str) -> str | None:
     t = (blob or "").lower()
-    if any(k in t for k in REUNION_KEYS) and not any(k in t for k in ("portail", "toit", "peinture", "moteur")):
-        return "reunion"
-    if any(k in t for k in CHANTIER_KEYS):
-        return "chantier"
-    if any(k in t for k in REUNION_KEYS):
+    if any(k in t for k in ("portail", "portillon", "cloture", "clôture", "coulissant", "battant")):
+        return "portail"
+    if any(k in t for k in ("salle de bain", "sdb", "douche", "baignoire", "lavabo", "carrelage")):
+        return "sdb"
+    if any(k in t for k in ("peinture", "facade", "façade", "enduit", "ponçage", "poncage")):
+        return "peinture"
+    if any(k in t for k in ("réunion", "reunion", "rdv", "rendez-vous", "visite client", "point client")):
         return "reunion"
     return None
-
-
-CHECKLIST_CHANTIER = [
-    {
-        "id": "peinture",
-        "label": "Faut-il reprendre la peinture ou un coup de propre ?",
-        "type": "oui_non",
-        "followups_if_oui": [
-            {"id": "peinture_faces", "label": "Les deux faces sont-elles à peindre ?", "type": "oui_non"},
-        ],
-    },
-    {
-        "id": "pieces",
-        "label": "Y a-t-il des pièces à remplacer (sinon réglage / graissage seulement) ?",
-        "type": "oui_non",
-        "followups_if_oui": [
-            {
-                "id": "pieces_a_reparer",
-                "label": "Quelles pièces à réparer ?",
-                "type": "texte",
-                "placeholder": "Ex : tôles, barreaux, galets",
-            },
-        ],
-    },
-    {
-        "id": "motorisation",
-        "label": "Faut-il prévoir une motorisation ?",
-        "type": "oui_non",
-        "followups_if_oui": [
-            {
-                "id": "longueur_portail",
-                "label": "Quelle est la longueur du portail (crémaillère) ?",
-                "type": "texte",
-                "placeholder": "Ex : 4 m",
-            },
-            {
-                "id": "moteur_en_place",
-                "label": "Une motorisation est-elle déjà en place ?",
-                "type": "oui_non",
-                "followups_if_oui": [
-                    {"id": "reutiliser_elec", "label": "Peut-on réutiliser l'électricité existante ?", "type": "oui_non"},
-                    {"id": "reutiliser_cellules", "label": "Peut-on garder les cellules ?", "type": "oui_non"},
-                    {"id": "reutiliser_gyro", "label": "Peut-on garder le gyrophare ?", "type": "oui_non"},
-                ],
-                "followups_if_non": [
-                    {
-                        "id": "tranchee",
-                        "label": "Faut-il prévoir une tranchée pour le câble électrique ?",
-                        "type": "oui_non",
-                        "followups_if_oui": [
-                            {
-                                "id": "tranchee_metres",
-                                "label": "Quelle longueur de tranchée (environ) ?",
-                                "type": "texte",
-                                "placeholder": "Ex : 8 m",
-                            },
-                        ],
-                    },
-                    {
-                        "id": "saignees",
-                        "label": "Faut-il des saignées dans les poteaux pour cellules ou gyrophare ?",
-                        "type": "oui_non",
-                    },
-                ],
-            },
-        ],
-    },
-]
-CHECKLIST_REUNION = [
-    {"id": "decision", "label": "Une décision a-t-elle été prise aujourd'hui ?", "type": "oui_non"},
-    {"id": "relance", "label": "Faut-il rappeler quelqu'un après cet échange ?", "type": "oui_non"},
-    {"id": "doc", "label": "Un document (devis, mail, photos) est-il à envoyer ?", "type": "oui_non"},
-    {"id": "suite", "label": "Une date de suite a-t-elle été fixée ?", "type": "oui_non"},
-]
 
 
 def _prune_item(it: dict, said: set) -> dict | None:
@@ -418,17 +398,10 @@ def generate_cr_checklist(instruction: str, answers: dict) -> list:
     kind = _detect_cr_family(blob)
     if not kind:
         return []
-    raw = CHECKLIST_CHANTIER if kind == "chantier" else CHECKLIST_REUNION
+    raw = PACKS.get(kind) or []
     said = _tokens(blob)
-    motor_already = any(w in blob for w in ("moteur", "motoris", "automatique"))
     items = []
     for it in raw:
-        if it.get("id") == "motorisation" and motor_already:
-            for nested in it.get("followups_if_oui") or []:
-                pruned = _prune_item(nested, said)
-                if pruned:
-                    items.append(pruned)
-            continue
         pruned = _prune_item(it, said)
         if pruned:
             items.append(pruned)
