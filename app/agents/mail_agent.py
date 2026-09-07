@@ -513,34 +513,17 @@ async def run_mail_agent(payload: dict) -> dict:
             style_block=style_block,
         )
 
-        # 2e passe UNIQUEMENT si le 1er jet ne respecte pas le style (gain de temps)
         if style and style_block:
             body0 = (email.get("body") or "")
-            ex0 = (style.get("example_message") or "").lower()
-            b0 = " " + body0.lower() + " "
-            needs = False
-            if any(w in ex0 for w in ("vous", "votre", "seriez", "pouvez")) and any(
-                w in b0 for w in (" tu ", " te ", " t'", " ton ", " ta ", " tes ")
-            ):
-                needs = True
-            if "salut" in ex0 and body0.lstrip().lower().startswith("bonjour"):
-                needs = True
-            if any(x in ex0 for x in ("mec", "a plus", "à plus")) and "cordialement" in b0:
-                needs = True
-            if "cordialement" in ex0 and ("à plus" in b0 or "a plus" in b0 or "salut mec" in b0):
-                needs = True
-            if needs:
-                update_progress(request_id, "generating_mail", f"Ajustement du style pour {to_name}…")
-                email = await rewrite_email_to_style(
-                    subject=email.get("subject") or "",
-                    body=body0,
-                    style=style,
-                    user_name=user_name,
-                    to_name=to_name,
-                )
-                print(f"[Mail] style rewrite done key={style_key}")
-            else:
-                print(f"[Mail] style rewrite skipped (1er jet OK) key={style_key}")
+            update_progress(request_id, "generating_mail", f"Ajustement du style pour {to_name}…")
+            email = await rewrite_email_to_style(
+                subject=email.get("subject") or "",
+                body=body0,
+                style=style,
+                user_name=user_name,
+                to_name=to_name,
+            )
+            print(f"[Mail] style rewrite always key={style_key}")
 
         body = email.get("body") or ""
         body = body.replace("L'utilisateur", user_name)

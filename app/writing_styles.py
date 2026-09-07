@@ -315,11 +315,20 @@ def get_style(user_id: str, style_key: str = None, style_id: str = None) -> Opti
         q = sb.table("user_writing_styles").select("*").eq("user_id", user_id)
         if style_id:
             q = q.eq("id", style_id)
-        elif style_key:
-            q = q.eq("key", style_key)
-        else:
+            res = q.limit(1).execute()
+            return (res.data or [None])[0]
+        if not style_key:
             return None
-        res = q.limit(1).execute()
+        key = str(style_key).strip()
+        res = q.eq("key", key).limit(1).execute()
+        if res.data:
+            return res.data[0]
+        q2 = sb.table("user_writing_styles").select("*").eq("user_id", user_id)
+        res = q2.ilike("key", key).limit(1).execute()
+        if res.data:
+            return res.data[0]
+        q3 = sb.table("user_writing_styles").select("*").eq("user_id", user_id)
+        res = q3.ilike("label", key).limit(1).execute()
         return (res.data or [None])[0]
     except Exception as e:
         print(f"[Styles] get error: {e}")
