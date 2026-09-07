@@ -33,7 +33,7 @@ REWRITE_HINTS = {
 }
 
 
-async def rewrite_existing_text(original: str, mode: str, note: str = "") -> str:
+async def rewrite_existing_text(original: str, mode: str, note: str = "", style_block: str = "") -> str:
     original = (original or "").strip()
     if not original:
         return ""
@@ -43,9 +43,13 @@ async def rewrite_existing_text(original: str, mode: str, note: str = "") -> str
         "Tu réécris un texte Clarity. Tu ne changes PAS les faits. "
         "Pas de nouveau prix, date, nom ou chiffre. Texte final uniquement."
     )
+    if style_block:
+        sys += " Le STYLE ci-dessous fait foi pour le ton (tutoiement, formules)."
     user = f"Consigne : {hint}\n"
     if extra:
         user += f"Précision utilisateur : {extra}\n"
+    if style_block:
+        user += f"\n=== STYLE ===\n{style_block}\n"
     user += f"\n--- TEXTE ---\n{original}"
     try:
         r = get_client().chat.completions.create(
@@ -502,8 +506,12 @@ async def run_redaction_agent(payload: dict) -> dict:
     rewrite_src = (payload.get("rewrite_of") or form_answers.get("rewrite_of") or "").strip()
     rewrite_mode = (payload.get("rewrite_mode") or form_answers.get("rewrite_mode") or "").strip()
     rewrite_note = (payload.get("rewrite_note") or form_answers.get("rewrite_note") or "").strip()
-    if rewrite_src and (rewrite_mode or rewrite_note):
-        new_txt = await rewrite_existing_text(rewrite_src, rewrite_mode, rewrite_note)
+    if rewrite_src and (rewrite_mode or rewrite_note or payload.get("style_key") or form_answers.get("style_key")):
+        sk = (payload.get("style_key") or form_answers.get("style_key") or "").strip()
+        st = get_style(user_id, style_key=sk or None) if user_id and sk else None
+        new_txt = await rewrite_existing_text(
+            rewrite_src, rewrite_mode, rewrite_note, style_prompt_block(st) if st else ""
+        )
         if not new_txt:
             return {"success": False, "message": "Impossible de proposer une autre version.", "request_id": request_id}
         return {

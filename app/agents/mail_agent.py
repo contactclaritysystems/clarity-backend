@@ -301,11 +301,14 @@ async def run_mail_agent(payload: dict) -> dict:
     rewrite_subj = (payload.get("rewrite_of_subject") or payload.get("subject") or "").strip()
     rewrite_mode = (payload.get("rewrite_mode") or "").strip()
     rewrite_note = (payload.get("rewrite_note") or "").strip()
-    if rewrite_body and (rewrite_mode or rewrite_note):
-        new_body = await rewrite_existing_text(rewrite_body, rewrite_mode, rewrite_note)
+    if rewrite_body and (rewrite_mode or rewrite_note or payload.get("style_key")):
+        sk = (payload.get("style_key") or "").strip()
+        st = get_style(user_id, style_key=sk or None) if user_id and sk else None
+        sblock = style_prompt_block(st) if st else ""
+        new_body = await rewrite_existing_text(rewrite_body, rewrite_mode, rewrite_note, sblock)
         new_subj = rewrite_subj
         if rewrite_subj and rewrite_mode in ("shorter", "simpler", "longer"):
-            ns = await rewrite_existing_text(rewrite_subj, rewrite_mode, rewrite_note)
+            ns = await rewrite_existing_text(rewrite_subj, rewrite_mode, rewrite_note, sblock)
             if ns:
                 new_subj = ns.split("\n")[0][:120]
         if not new_body:
