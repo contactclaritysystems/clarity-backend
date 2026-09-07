@@ -181,6 +181,21 @@ def list_styles(user_id: str) -> List[Dict[str, Any]]:
     for k, row in db_by_key.items():
         if k not in seen:
             out.append(row)
+    # Un seul style par libellé (évite 2× Client inconnu)
+    by_lab = {}
+    for row in out:
+        lab = (row.get("label") or row.get("key") or "").strip().lower()
+        if not lab:
+            continue
+        prev = by_lab.get(lab)
+        if not prev:
+            by_lab[lab] = row
+            continue
+        t_new = row.get("updated_at") or ""
+        t_old = prev.get("updated_at") or ""
+        if t_new >= t_old:
+            by_lab[lab] = row
+    out = list(by_lab.values())
     out.sort(key=lambda r: (r.get("label") or r.get("key") or "").lower())
     return out
 
@@ -349,6 +364,26 @@ def get_style(user_id: str, style_key: str = None, style_id: str = None) -> Opti
     except Exception as e:
         print(f"[Styles] get error: {e}")
         return None
+
+
+def delete_style(user_id: str, style_id: str = None, key: str = None) -> dict:
+    if not user_id:
+        return {"success": False, "message": "user_id manquant"}
+    sb = get_supabase()
+    if not sb:
+        return {"success": False, "message": "Supabase indisponible"}
+    try:
+        q = sb.table("user_writing_styles").delete().eq("user_id", user_id)
+        if style_id:
+            q = q.eq("id", style_id)
+        elif key:
+            q = q.eq("key", key)
+        else:
+            return {"success": False, "message": "id ou key requis"}
+        q.execute()
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 def style_prompt_block(style: Optional[dict]) -> str:

@@ -19,7 +19,7 @@ from app.agents.relance_agent import run_relance_agent
 from app.agents.assistant_agent import run_assistant_agent
 from app.agents.redaction_agent import run_redaction_agent
 from app.agents.taches_agent import run_taches_agent
-from app.writing_styles import list_styles, create_style
+from app.writing_styles import list_styles, create_style, delete_style
 from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
 from app.notifications import run_notification_pass, send_email, get_digest_settings, save_digest_settings
@@ -362,6 +362,11 @@ async def styles_create(payload: StyleCreatePayload):
         return create_style(payload.user_id, payload.model_dump())
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+@app.delete("/styles/{style_id}")
+async def styles_delete(style_id: str, user_id: str = ""):
+    return delete_style(user_id, style_id=style_id)
 
 
 
