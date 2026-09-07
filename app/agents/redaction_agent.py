@@ -26,6 +26,39 @@ def get_client():
     return OpenAI(api_key=api_key)
 
 
+REWRITE_HINTS = {
+    "shorter": "Plus court. Mêmes faits. Coupe le gras.",
+    "longer": "Un peu plus développé, sans inventer de faits.",
+    "simpler": "Phrases plus simples. Même tutoiement ou vouvoiement.",
+}
+
+
+async def rewrite_existing_text(original: str, mode: str, note: str = "") -> str:
+    original = (original or "").strip()
+    if not original:
+        return ""
+    hint = REWRITE_HINTS.get((mode or "").strip().lower()) or "Autre formulation, mêmes faits."
+    extra = (note or "").strip()
+    sys = (
+        "Tu réécris un texte Clarity. Tu ne changes PAS les faits. "
+        "Pas de nouveau prix, date, nom ou chiffre. Texte final uniquement."
+    )
+    user = f"Consigne : {hint}\n"
+    if extra:
+        user += f"Précision utilisateur : {extra}\n"
+    user += f"\n--- TEXTE ---\n{original}"
+    try:
+        r = get_client().chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "system", "content": sys}, {"role": "user", "content": user}],
+            temperature=0.35,
+        )
+        return (r.choices[0].message.content or "").strip()
+    except Exception as e:
+        print(f"[Redaction] rewrite err: {e}")
+        return ""
+
+
 FORMS = {
     "offre": {
         "title": "Votre offre",
@@ -463,6 +496,22 @@ async def run_redaction_agent(payload: dict) -> dict:
             "success": False,
             "reason": "missing_content",
             "message": "Que souhaitez-vous que je rédige ?",
+            "request_id": request_id,
+        }
+
+    rewrite_src = (payload.get("rewrite_of") or form_answers.get("rewrite_of") or "").strip()
+    rewrite_mode = (payload.get("rewrite_mode") or form_answers.get("rewrite_mode") or "").strip()
+    rewrite_note = (payload.get("rewrite_note") or form_answers.get("rewrite_note") or "").strip()
+    if rewrite_src and (rewrite_mode or rewrite_note):
+        new_txt = await rewrite_existing_text(rewrite_src, rewrite_mode, rewrite_note)
+        if not new_txt:
+            return {"success": False, "message": "Impossible de proposer une autre version.", "request_id": request_id}
+        return {
+            "success": True,
+            "title": "Rédaction",
+            "message": new_txt,
+            "content": new_txt,
+            "rewritten": True,
             "request_id": request_id,
         }
 

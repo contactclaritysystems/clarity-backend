@@ -11,6 +11,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from app.writing_styles import get_style, style_prompt_block
+from app.agents.redaction_agent import rewrite_existing_text
 
 load_dotenv()
 
@@ -292,6 +293,37 @@ async def run_mail_agent(payload: dict) -> dict:
     user_id = payload.get("user_id")
     user_name = (payload.get("user_name") or "").strip() or "Anthony"
     contact_id = payload.get("contact_id")
+
+    if not instruction and not payload.get("rewrite_of") and not payload.get("rewrite_of_body"):
+        return {"success": False, "message": "Aucune instruction reçue.", "request_id": request_id}
+
+    rewrite_body = (payload.get("rewrite_of_body") or payload.get("rewrite_of") or "").strip()
+    rewrite_subj = (payload.get("rewrite_of_subject") or payload.get("subject") or "").strip()
+    rewrite_mode = (payload.get("rewrite_mode") or "").strip()
+    rewrite_note = (payload.get("rewrite_note") or "").strip()
+    if rewrite_body and (rewrite_mode or rewrite_note):
+        new_body = await rewrite_existing_text(rewrite_body, rewrite_mode, rewrite_note)
+        new_subj = rewrite_subj
+        if rewrite_subj and rewrite_mode in ("shorter", "simpler", "longer"):
+            ns = await rewrite_existing_text(rewrite_subj, rewrite_mode, rewrite_note)
+            if ns:
+                new_subj = ns.split("\n")[0][:120]
+        if not new_body:
+            return {"success": False, "message": "Impossible de proposer une autre version.", "request_id": request_id}
+        return {
+            "success": True,
+            "action": "preview",
+            "subject": new_subj,
+            "body": new_body,
+            "message": new_body,
+            "content": new_body,
+            "rewritten": True,
+            "to": payload.get("to"),
+            "to_name": payload.get("to_name"),
+            "cc": payload.get("cc"),
+            "cc_name": payload.get("cc_name"),
+            "request_id": request_id,
+        }
 
     if not instruction:
         return {"success": False, "message": "Aucune instruction reçue.", "request_id": request_id}
