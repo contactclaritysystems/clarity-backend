@@ -354,7 +354,9 @@ def style_prompt_block(style: Optional[dict]) -> str:
         "- meme tutoiement ou vouvoiement (ou equivalent dans la langue)\n"
         "- meme niveau de formalite / familiarite (salutations, formules de fin, vocabulaire)\n"
         "- meme longueur relative et meme energie\n"
-        "Ne copie PAS le sujet de l'exemple : uniquement la maniere d'ecrire.\n"
+        "Ne copie PAS le sujet de l'exemple (en discuter, venir manger) :\n"
+        "uniquement salutations / tu-vous / formule de fin.\n"
+        "Le fond vient UNIQUEMENT de la demande.\n"
         "Aucune regle generique (professionnel, Cordialement, Bonjour, etc.) "
         "ne doit contredire cet exemple."
     )

@@ -260,6 +260,9 @@ async def rewrite_email_to_style(subject: str, body: str, style: dict, user_name
         "Regles: meme langue que l'exemple; meme tutoiement/vouvoiement; "
         "memes types de salutation et de formule de fin; "
         "ne change pas les faits (dates, heures, noms); "
+        "INTERDIT de recopier le sujet de l'exemple "
+        "(en discuter, venir manger, point, chantier). "
+        "Le fond = la demande actuelle seulement. "
         "ecris a la 1re personne; signature = nom fourni; "
         "si l'exemple vouvoie, INTERDIT d'utiliser tu/te/ton/ta."
     )
