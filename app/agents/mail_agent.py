@@ -190,10 +190,14 @@ Règles STRICTES de mise en page :
 - Respecte le ton demandé
 - N'invente JAMAIS de dates, montants, lieux ou détails non fournis dans le contenu
 - Si les dates de congés ne sont pas précisées, demande-les implicitement ou reste vague ("sur la période souhaitée") SANS inventer du 10 au 14 avril
+- RDV : si l'utilisateur DONNE ou PROPOSE un créneau ("rdv demain 8h", "dit-lui mardi")
+  → "Je vous propose" / "Seriez-vous disponible" (ou tutoiement selon le style).
+  INTERDIT : "je vous confirme notre rendez-vous" sauf si l'utilisateur a dit
+  que c'est déjà confirmé / noté / c'est bon / on a validé.
 - JSON uniquement : {"subject": "...", "body": "..."}
 
 Exemple de body :
-"Bonjour Antoine,\n\nJe tenais à te confirmer que le passage est prévu demain matin.\n\nCordialement,\nAnthony"
+"Bonjour Antoine,\n\nSeriez-vous disponible demain matin pour un rendez-vous ?\n\nCordialement,\nAnthony"
 """
 
 
