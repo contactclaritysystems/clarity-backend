@@ -9,8 +9,8 @@ load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, ConfigDict
+from typing import Optional, Any
 
 from app.orchestrator import run_orchestrator
 from app.agents.mail_agent import run_mail_agent
@@ -54,12 +54,25 @@ class OrchestratorPayload(BaseModel):
 
 
 class AgentPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
     user_id: Optional[str] = None
     user_email: Optional[str] = None
     user_name: Optional[str] = None
     instruction: str = ""
     request_id: Optional[str] = None
     contact_id: Optional[str] = None
+    rewrite_mode: Optional[str] = None
+    rewrite_note: Optional[str] = None
+    rewrite_of: Optional[str] = None
+    rewrite_of_body: Optional[str] = None
+    rewrite_of_subject: Optional[str] = None
+    current_body: Optional[str] = None
+    body: Optional[str] = None
+    subject: Optional[str] = None
+    to: Optional[Any] = None
+    to_name: Optional[str] = None
+    cc: Optional[Any] = None
+    cc_name: Optional[str] = None
     # Planning / Relances (slot-filling)
     reason: Optional[str] = None
     contact_name: Optional[str] = None
