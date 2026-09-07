@@ -11,69 +11,85 @@ from supabase import create_client, Client
 
 load_dotenv()
 
+# Même situation pour tous : demander une dispo demain matin.
+# Uniquement le TON change. Les comptes existants gardent leur texte en base.
 DEFAULT_STYLES = [
     {
         "key": "frere_soeur",
         "label": "Frère / Sœur",
-        "example_message": "Viens manger ce soir à la maison",
+        "example_message": "Salut, tu es dispo demain matin ?",
         "opening": "Salut",
         "closing": "À plus",
     },
     {
         "key": "ami",
         "label": "Ami",
-        "example_message": "Salut, tu viens manger ce soir ?",
+        "example_message": "Salut, tu es dispo demain matin ?",
         "opening": "Salut",
-        "closing": "À tout",
+        "closing": "À plus",
     },
     {
         "key": "collegue",
         "label": "Collègue",
-        "example_message": "Tu serais dispo pour un point demain matin ?",
-        "opening": "Hello",
+        "example_message": "Tu serais dispo demain matin ?",
+        "opening": "Salut",
         "closing": "Bonne journée",
+    },
+    {
+        "key": "equipe",
+        "label": "Équipe",
+        "example_message": "Hello, vous êtes dispo demain matin ?",
+        "opening": "Hello",
+        "closing": "À plus",
     },
     {
         "key": "patron",
         "label": "Patron",
-        "example_message": "Bonjour, seriez-vous disponible pour en discuter demain ?",
+        "example_message": "Bonjour,\nSeriez-vous disponible demain matin ?\nCordialement,",
         "opening": "Bonjour",
         "closing": "Cordialement",
     },
     {
         "key": "client",
         "label": "Client",
-        "example_message": "Bonjour, je me permets de vous contacter concernant notre rendez-vous.",
+        "example_message": "Bonjour,\nSeriez-vous disponible demain matin ?\nBien à vous,",
+        "opening": "Bonjour",
+        "closing": "Bien à vous",
+    },
+    {
+        "key": "client_connu",
+        "label": "Client connu",
+        "example_message": "Bonjour,\nSeriez-vous disponible demain matin ?\nBien à vous,",
+        "opening": "Bonjour",
+        "closing": "Bien à vous",
+    },
+    {
+        "key": "client_inconnu",
+        "label": "Client inconnu",
+        "example_message": "Bonjour,\nJe vous contacte pour convenir d'un créneau demain matin.\nCordialement,",
         "opening": "Bonjour",
         "closing": "Cordialement",
     },
     {
         "key": "fournisseur",
         "label": "Fournisseur",
-        "example_message": "Bonjour, pourriez-vous me confirmer la date de livraison ?",
+        "example_message": "Bonjour,\nPourriez-vous me confirmer votre disponibilité demain matin ?\nMerci d'avance,",
         "opening": "Bonjour",
-        "closing": "Cordialement",
+        "closing": "Merci d'avance",
     },
     {
         "key": "prospect",
         "label": "Prospect",
-        "example_message": "Bonjour, je vous propose un créneau pour vous présenter notre offre.",
+        "example_message": "Bonjour,\nJe vous propose un créneau demain matin.\nCordialement,",
         "opening": "Bonjour",
         "closing": "Cordialement",
     },
     {
         "key": "administration",
         "label": "Administration",
-        "example_message": "Bonjour, je me permets de vous écrire afin de convenir d'un rendez-vous.",
-        "opening": "Madame, Monsieur",
-        "closing": "Veuillez agréer mes salutations",
-    },
-    {
-        "key": "equipe",
-        "label": "Équipe",
-        "example_message": "Hello, on se retrouve demain 8h sur le chantier, n'oubliez pas vos outils.",
-        "opening": "Hello",
-        "closing": "À demain",
+        "example_message": "Bonjour,\nJe me permets de vous écrire afin de convenir d'un créneau.\nVeuillez agréer mes salutations distinguées,",
+        "opening": "Bonjour",
+        "closing": "Veuillez agréer mes salutations distinguées",
     },
 ]
 
@@ -344,21 +360,12 @@ def style_prompt_block(style: Optional[dict]) -> str:
     if not example:
         return "Style choisi : %s (pas d'exemple fourni)." % label
     return (
-        "=== STYLE D'ECRITURE A REPRODUIRE A L'IDENTIQUE (PRIORITE ABSOLUE) ===\n"
+        "=== TON A SUIVRE (inspiration, pas copie) ===\n"
         "Nom du style : " + label + "\n"
-        "Exemple ecrit par l'utilisateur (MODELE UNIQUE) :\n"
-        "« " + example + " »\n\n"
-        "Tu DOIS rediger le message dans EXACTEMENT le meme style que cet exemple :\n"
-        "- MEME LANGUE (exemple en anglais → tout le message en anglais ; "
-        "francais → francais ; toute autre langue → cette langue)\n"
-        "- meme tutoiement ou vouvoiement (ou equivalent dans la langue)\n"
-        "- meme niveau de formalite / familiarite (salutations, formules de fin, vocabulaire)\n"
-        "- meme longueur relative et meme energie\n"
-        "Ne copie PAS le sujet de l'exemple (en discuter, venir manger) :\n"
-        "uniquement salutations / tu-vous / formule de fin.\n"
-        "Le fond vient UNIQUEMENT de la demande.\n"
-        "Aucune regle generique (professionnel, Cordialement, Bonjour, etc.) "
-        "ne doit contredire cet exemple."
+        "Exemple de l'utilisateur :\n« " + example + " »\n\n"
+        "Inspire-toi du TON seulement : langue, tu/vous, salutation, formule de fin, familiarite.\n"
+        "INTERDIT de recopier le sujet de l'exemple.\n"
+        "Le fond (quoi, quand, qui) vient UNIQUEMENT de la demande actuelle."
     )
 
 
