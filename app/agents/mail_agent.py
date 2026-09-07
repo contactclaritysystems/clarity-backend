@@ -194,6 +194,8 @@ Règles STRICTES de mise en page :
   → "Je vous propose" / "Seriez-vous disponible" (ou tutoiement selon le style).
   INTERDIT : "je vous confirme notre rendez-vous" sauf si l'utilisateur a dit
   que c'est déjà confirmé / noté / c'est bon / on a validé.
+- Objet : court, concret, aligné sur le contenu (ex: "Disponibilité mardi 8h").
+  INTERDIT : "Confirmation de rendez-vous", "Rendez-vous", "Message" si on propose un créneau.
 - JSON uniquement : {"subject": "...", "body": "..."}
 
 Exemple de body :
@@ -327,10 +329,6 @@ async def run_mail_agent(payload: dict) -> dict:
         sblock = style_prompt_block(st) if st else ""
         new_body = await rewrite_existing_text(rewrite_body, rewrite_mode, rewrite_note, sblock)
         new_subj = rewrite_subj
-        if rewrite_subj and rewrite_mode in ("shorter", "simpler", "longer"):
-            ns = await rewrite_existing_text(rewrite_subj, rewrite_mode, rewrite_note, sblock)
-            if ns:
-                new_subj = ns.split("\n")[0][:120]
         if not new_body:
             return {"success": False, "message": "Impossible de proposer une autre version.", "request_id": request_id}
         return {

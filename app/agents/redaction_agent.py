@@ -44,7 +44,11 @@ async def rewrite_existing_text(original: str, mode: str, note: str = "", style_
         "Pas de nouveau prix, date, nom ou chiffre. Texte final uniquement."
     )
     if style_block:
-        sys += " Le STYLE ci-dessous fait foi pour le ton (tutoiement, formules)."
+        sys += (
+            " Reproduis UNIQUEMENT le ton de l'exemple utilisateur (STYLE). "
+            "Le nom du style (patron, ami…) n'impose rien. "
+            "Si l'exemple tutoie, tutoie. S'il vouvoie, vouvoie."
+        )
     user = f"Consigne : {hint}\n"
     if extra:
         user += f"Précision utilisateur : {extra}\n"
