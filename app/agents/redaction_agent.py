@@ -213,8 +213,10 @@ Si un élément est à la fois acheté et posé, il peut être dans les deux (to
 Réunion : seulement si le brief parle d'une réunion. JAMAIS chantier + réunion ensemble.
 Pas de phrase "aucun autre", "aucune décision", "aucune suite".
 En-tête OBLIGATOIRE sur TOUS les comptes rendus :
-ligne 1 : Compte-rendu — [sujet]
-ligne 2 : Date : [date fournie dans le message]
+ligne 1 : Compte-rendu — [sujet sans répéter Compte-rendu]
+ligne 2 : Date : [date fournie]
+ligne 3 : Auteur : [si un nom est fourni dans le message]
+Si le brief contient relance, rappel ou envoi à faire : section finale "À faire" uniquement avec ces faits.
 Pas de "Voici le compte-rendu".
 Style : phrases courtes, comme un vrai compte rendu.
 INTERDIT d'amplifier ("il est crucial", "il convient de", "ne rien omettre").
