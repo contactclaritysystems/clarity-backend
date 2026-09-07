@@ -40,14 +40,14 @@ async def rewrite_existing_text(original: str, mode: str, note: str = "", style_
     hint = REWRITE_HINTS.get((mode or "").strip().lower()) or "Autre formulation, mêmes faits."
     extra = (note or "").strip()
     sys = (
-        "Tu réécris un texte Clarity. Tu ne changes PAS les faits. "
-        "Pas de nouveau prix, date, nom ou chiffre. Texte final uniquement."
+        "Tu réécris un texte Clarity. Tu ne changes PAS les faits "
+        "(noms, dates, heures, lieux). Texte final uniquement."
     )
     if style_block:
         sys += (
-            " Reproduis UNIQUEMENT le ton de l'exemple utilisateur (STYLE). "
-            "Le nom du style (patron, ami…) n'impose rien. "
-            "Si l'exemple tutoie, tutoie. S'il vouvoie, vouvoie."
+            " IGNORE le ton actuel (salut, tu, à plus, mec…). "
+            "Réécris salutations et formule de fin comme dans STYLE. "
+            "Garde seulement les faits. Seul l'exemple compte."
         )
     user = f"Consigne : {hint}\n"
     if extra:

@@ -327,8 +327,20 @@ async def run_mail_agent(payload: dict) -> dict:
         sk = (payload.get("style_key") or "").strip()
         st = get_style(user_id, style_key=sk or None) if user_id and sk else None
         sblock = style_prompt_block(st) if st else ""
-        new_body = await rewrite_existing_text(rewrite_body, rewrite_mode, rewrite_note, sblock)
         new_subj = rewrite_subj
+        if st:
+            out = await rewrite_email_to_style(
+                rewrite_subj,
+                rewrite_body,
+                st,
+                user_name,
+                payload.get("to_name") or "",
+            )
+            new_body = (out.get("body") or "").strip()
+            if rewrite_mode in ("shorter", "longer", "simpler") or rewrite_note:
+                new_body = await rewrite_existing_text(new_body, rewrite_mode, rewrite_note, sblock) or new_body
+        else:
+            new_body = await rewrite_existing_text(rewrite_body, rewrite_mode, rewrite_note, sblock)
         if not new_body:
             return {"success": False, "message": "Impossible de proposer une autre version.", "request_id": request_id}
         return {
