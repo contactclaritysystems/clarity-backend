@@ -13,6 +13,10 @@ from app.writing_styles import get_style, style_prompt_block, list_styles
 
 load_dotenv()
 MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+# Packs portail/SDB/peinture/réunion conservés plus bas.
+# False = CR V1 sans questions (points + photos seulement).
+CHECKLIST_ENABLED = False
+
 
 
 def get_client():
@@ -460,7 +464,7 @@ async def run_redaction_agent(payload: dict) -> dict:
             brief = answers_to_brief(form_answers)
             base_instruction = instruction or payload.get("original_instruction") or "Rédige le texte demandé."
             cr = is_compte_rendu(base_instruction, form_answers)
-            if cr and not _checklist_done(form_answers):
+            if cr and CHECKLIST_ENABLED and not _checklist_done(form_answers):
                 items = generate_cr_checklist(base_instruction, form_answers)
                 return {
                     "success": False,
@@ -515,7 +519,7 @@ async def run_redaction_agent(payload: dict) -> dict:
             }
 
         if has_enough_in_instruction(instruction):
-            if is_compte_rendu(instruction) and not _checklist_done(form_answers or {}):
+            if is_compte_rendu(instruction) and CHECKLIST_ENABLED and not _checklist_done(form_answers or {}):
                 items = generate_cr_checklist(instruction, form_answers or {})
                 return {
                     "success": False,
