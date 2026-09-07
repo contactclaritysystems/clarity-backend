@@ -298,14 +298,30 @@ async def run_mail_agent(payload: dict) -> dict:
     user_name = (payload.get("user_name") or "").strip() or "Anthony"
     contact_id = payload.get("contact_id")
 
-    if not instruction and not payload.get("rewrite_of") and not payload.get("rewrite_of_body"):
-        return {"success": False, "message": "Aucune instruction reçue.", "request_id": request_id}
-
-    rewrite_body = (payload.get("rewrite_of_body") or payload.get("rewrite_of") or "").strip()
-    rewrite_subj = (payload.get("rewrite_of_subject") or payload.get("subject") or "").strip()
     rewrite_mode = (payload.get("rewrite_mode") or "").strip()
     rewrite_note = (payload.get("rewrite_note") or "").strip()
-    if rewrite_body and (rewrite_mode or rewrite_note or payload.get("style_key")):
+    style_key_in = (payload.get("style_key") or "").strip()
+    rewrite_body = (
+        payload.get("rewrite_of_body")
+        or payload.get("rewrite_of")
+        or payload.get("current_body")
+        or payload.get("body")
+        or ""
+    )
+    if isinstance(rewrite_body, str):
+        rewrite_body = rewrite_body.strip()
+    else:
+        rewrite_body = ""
+    rewrite_subj = (payload.get("rewrite_of_subject") or payload.get("subject") or "").strip()
+    want_rewrite = bool(rewrite_mode or rewrite_note or style_key_in)
+
+    if want_rewrite and not rewrite_body and instruction:
+        rewrite_body = instruction
+
+    if not instruction and not rewrite_body:
+        return {"success": False, "message": "Aucune instruction reçue.", "request_id": request_id}
+
+    if rewrite_body and want_rewrite:
         sk = (payload.get("style_key") or "").strip()
         st = get_style(user_id, style_key=sk or None) if user_id and sk else None
         sblock = style_prompt_block(st) if st else ""
