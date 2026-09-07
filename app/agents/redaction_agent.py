@@ -213,6 +213,10 @@ Si un élément est à la fois acheté et posé, il peut être dans les deux (to
 Réunion : seulement si le brief parle d'une réunion. JAMAIS chantier + réunion ensemble.
 Pas de phrase "aucun autre", "aucune décision", "aucune suite".
 Titre court. Pas de "Voici le compte-rendu".
+Style : phrases courtes, comme un vrai compte rendu.
+INTERDIT d'amplifier ("il est crucial", "il convient de", "ne rien omettre").
+Reprendre les mots de l'utilisateur, juste mieux ordonnes.
+
 """
 
 WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
