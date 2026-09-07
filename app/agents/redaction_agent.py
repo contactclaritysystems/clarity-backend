@@ -212,7 +212,10 @@ Chantier : deux blocs seulement s'ils ont du contenu dans le brief :
 Si un élément est à la fois acheté et posé, il peut être dans les deux (tole = matériel + remplacement).
 Réunion : seulement si le brief parle d'une réunion. JAMAIS chantier + réunion ensemble.
 Pas de phrase "aucun autre", "aucune décision", "aucune suite".
-Titre court. Pas de "Voici le compte-rendu".
+En-tête OBLIGATOIRE sur TOUS les comptes rendus :
+ligne 1 : Compte-rendu — [sujet]
+ligne 2 : Date : [date fournie dans le message]
+Pas de "Voici le compte-rendu".
 Style : phrases courtes, comme un vrai compte rendu.
 INTERDIT d'amplifier ("il est crucial", "il convient de", "ne rien omettre").
 Reprendre les mots de l'utilisateur, juste mieux ordonnes.
@@ -226,7 +229,11 @@ Texte final direct, sans "Voici le message&".
 
 
 async def write_text(instruction: str, history: str, user_name: str, brief: str, memory_text: str = "", style_block: str = "", compte_rendu: bool = False) -> str:
-    today = datetime.now().strftime("%d/%m/%Y")
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y")
+    except Exception:
+        today = datetime.now().strftime("%d/%m/%Y")
     user_msg = f"Date : {today}\n"
     if user_name:
         user_msg += f"Auteur possible : {user_name}\n"
