@@ -190,12 +190,13 @@ Règles STRICTES de mise en page :
 - Respecte le ton demandé
 - N'invente JAMAIS de dates, montants, lieux ou détails non fournis dans le contenu
 - Si les dates de congés ne sont pas précisées, demande-les implicitement ou reste vague ("sur la période souhaitée") SANS inventer du 10 au 14 avril
-- RDV : si l'utilisateur DONNE ou PROPOSE un créneau ("rdv demain 8h", "dit-lui mardi")
-  → "Je vous propose" / "Seriez-vous disponible" (ou tutoiement selon le style).
-  INTERDIT : "je vous confirme notre rendez-vous" sauf si l'utilisateur a dit
-  que c'est déjà confirmé / noté / c'est bon / on a validé.
-- Objet : court, concret, aligné sur le contenu (ex: "Disponibilité mardi 8h").
-  INTERDIT : "Confirmation de rendez-vous", "Rendez-vous", "Message" si on propose un créneau.
+- RDV : si l'utilisateur DONNE un créneau ("rdv demain 7h", "dit-lui mardi 8h")
+  → propose ou fixe CE créneau, sans le transformer.
+  INTERDIT : "je voulais te/vous rappeler", "rappel de notre rendez-vous",
+  "je vous confirme" (sauf s'il a dit confirmé / c'est noté / c'est bon).
+  INTERDIT d'inventer un autre type de message (relance, excuse, recap).
+- Objet : le créneau, rien d'autre (ex: "Demain 7h").
+  INTERDIT : "Rappel de notre rendez-vous", "Confirmation de rendez-vous".
 - JSON uniquement : {"subject": "...", "body": "..."}
 
 Exemple de body :
