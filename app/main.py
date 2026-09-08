@@ -25,6 +25,7 @@ from app.feature_requests import save_feature_request
 from app.notifications import run_notification_pass, send_email, get_digest_settings, save_digest_settings
 from app.tasks import list_tasks, create_task, update_task, delete_task
 from app.contact_activity import get_activity, patch_contact, log_sent_mail
+from app.mail_send import send_user_mail
 
 _NOTIFY_TEST_LAST = {}
 
@@ -230,6 +231,15 @@ async def orchestrator_endpoint(payload: OrchestratorPayload):
             "message": "Erreur orchestrateur. Réessaie.",
             "request_id": payload.request_id
         }
+
+
+@app.post("/mail/send")
+async def mail_send_endpoint(payload: AgentPayload):
+    try:
+        return send_user_mail(payload.model_dump())
+    except Exception as e:
+        print(f"[MAIL SEND] {e}")
+        return {"success": False, "message": "Impossible d'envoyer le mail."}
 
 
 @app.post("/agent/mail")
