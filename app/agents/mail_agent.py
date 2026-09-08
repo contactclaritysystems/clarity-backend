@@ -227,6 +227,9 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
         f"Destinataire : {to_name or 'le destinataire'}",
         "Ecris a la 1re personne (je/moi ou I/me selon la langue du style).",
         f"Signature obligatoire : {user_name}",
+        "Si le contenu est un creneau de RDV : ecrire 'Je te/vous donne rendez-vous [jour] a [heure] [lieu]'.",
+        "INTERDIT dans ce cas : confirmer, rappel, confirmation, c'est confirme.",
+        "Objet = jour + heure + lieu, jamais le mot Confirmation.",
     ]
     if relationship and not style_block:
         parts.append(f"Relation : {relationship}")
