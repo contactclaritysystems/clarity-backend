@@ -32,16 +32,21 @@ def _rows(user_id: str) -> list:
 def _pick(rows: list, via: str) -> Optional[dict]:
     via = (via or "").lower()
     google = [r for r in rows if (r.get("provider") or "").lower() == "google"]
+    outlook = [r for r in rows if (r.get("provider") or "").lower() in ("microsoft", "outlook")]
     smtp = [r for r in rows if (r.get("provider") or "").lower() == "smtp" and r.get("smtp_host")]
     live = [r for r in rows if r.get("connected") is True]
     if via in ("gmail", "google"):
         return next((r for r in live if (r.get("provider") or "").lower() == "google"), None) or (google[0] if google else None)
+    if via in ("outlook", "microsoft"):
+        return next((r for r in live if (r.get("provider") or "").lower() in ("microsoft", "outlook")), None) or (outlook[0] if outlook else None)
     if via == "smtp":
         return smtp[0] if smtp else None
     if live:
         return live[0]
     if google:
         return google[0]
+    if outlook:
+        return outlook[0]
     if smtp:
         return smtp[0]
     return rows[0] if rows else None
@@ -129,6 +134,81 @@ def _gmail_send(token: str, raw_b64: str) -> dict:
     return {"ok": False, "reauth": False}
 
 
+def _refresh_microsoft(refresh_token: str) -> Optional[str]:
+    cid = os.getenv("MICROSOFT_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID")
+    csec = os.getenv("MICROSOFT_CLIENT_SECRET") or os.getenv("AZURE_CLIENT_SECRET")
+    tenant = os.getenv("MICROSOFT_TENANT") or "common"
+    if not (cid and refresh_token):
+        print("[MailSend] Microsoft client id manquant")
+        return None
+    data = {
+        "client_id": cid,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+        "scope": "https://graph.microsoft.com/Mail.Send offline_access",
+    }
+    if csec:
+        data["client_secret"] = csec
+    try:
+        r = httpx.post(
+            f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+            data=data,
+            timeout=20,
+        )
+        js = r.json() if r.content else {}
+        if r.status_code >= 400:
+            print(f"[MailSend] refresh ms {r.status_code} {js}")
+            return None
+        return js.get("access_token")
+    except Exception as e:
+        print(f"[MailSend] refresh ms err: {e}")
+        return None
+
+
+def _outlook_send(token: str, to_addr: str, to_name: str, subject: str, body: str, attachments: list) -> dict:
+    html = body if "<" in str(body) else str(body).replace("\n", "<br>\n")
+    atts = []
+    for att in attachments if isinstance(attachments, list) else []:
+        if not isinstance(att, dict):
+            continue
+        raw = att.get("content_b64") or att.get("data") or ""
+        if not raw:
+            continue
+        atts.append(
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": att.get("filename") or att.get("name") or "fichier",
+                "contentType": att.get("mime") or "application/octet-stream",
+                "contentBytes": raw,
+            }
+        )
+    payload = {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "HTML", "content": html},
+            "toRecipients": [
+                {"emailAddress": {"address": to_addr, "name": to_name or to_addr}}
+            ],
+        }
+    }
+    if atts:
+        payload["message"]["attachments"] = atts
+    r = httpx.post(
+        "https://graph.microsoft.com/v1.0/me/sendMail",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=30,
+    )
+    if r.status_code in (200, 202):
+        return {"ok": True}
+    txt = (r.text or "")[:300]
+    print(f"[MailSend] outlook send {r.status_code} {txt}")
+    low = txt.lower()
+    if r.status_code in (401, 403) or "invalid_grant" in low or "insufficient" in low:
+        return {"ok": False, "reauth": True}
+    return {"ok": False, "reauth": False}
+
+
 def send_user_mail(payload: dict) -> dict:
     user_id = (payload.get("user_id") or "").strip()
     to_addr = (payload.get("to") or payload.get("to_email") or "").strip()
@@ -183,6 +263,33 @@ def send_user_mail(payload: dict) -> dict:
             "success": False,
             "reason": "reauth_required" if out.get("reauth") else "send_failed",
             "message": "Reconnectez Gmail dans Réglages." if out.get("reauth") else "L'envoi Gmail a échoué.",
+        }
+
+    if provider in ("microsoft", "outlook"):
+        token = (integ.get("access_token") or "").strip()
+        refresh = (integ.get("refresh_token") or "").strip()
+        if not token and refresh:
+            token = _refresh_microsoft(refresh) or ""
+            if token:
+                _save_access(integ.get("id"), token)
+        if not token:
+            return {
+                "success": False,
+                "reason": "reauth_required",
+                "message": "Reconnectez Outlook dans Réglages.",
+            }
+        out = _outlook_send(token, to_addr, to_name, subject, body, attachments)
+        if not out.get("ok") and refresh:
+            token = _refresh_microsoft(refresh) or ""
+            if token:
+                _save_access(integ.get("id"), token)
+                out = _outlook_send(token, to_addr, to_name, subject, body, attachments)
+        if out.get("ok"):
+            return {"success": True, "via": "outlook", "message": "Mail envoyé."}
+        return {
+            "success": False,
+            "reason": "reauth_required" if out.get("reauth") else "send_failed",
+            "message": "Reconnectez Outlook dans Réglages." if out.get("reauth") else "L'envoi Outlook a échoué.",
         }
 
     host = (integ.get("smtp_host") or "").strip()
