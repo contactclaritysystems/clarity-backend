@@ -147,9 +147,31 @@ def detect_form_type(instruction: str) -> str:
     return "generic"
 
 
+def extract_cr_subject(instruction: str) -> str:
+    """Titre court : 'Clarity crée-moi un CR pour la remise en état du portail' → 'Remise en état du portail'."""
+    t = (instruction or "").strip()
+    if not t:
+        return ""
+    t = re.sub(r"^(clarif(?:y|ie|ié)|clarity|ok|alors|euh)\s*[,:]?\s*", "", t, flags=re.I)
+    t = re.sub(
+        r"^(crée[- ]?moi|crees?[- ]?moi|fais[- ]?moi|rédige|redige|prépare|prepare)\s+"
+        r"(un |une |le |la |l['’])?(compte[- ]rendus?|cr)\s*"
+        r"(pour |sur |de |d['’])?",
+        "",
+        t,
+        flags=re.I,
+    )
+    t = re.sub(r"^(le |la |les |l['’]|un |une |de |du |des )", "", t.strip(), flags=re.I)
+    t = t.strip(" .,:;")
+    if len(t) < 3 or t.lower() in ("compte rendu", "compte-rendu", "cr"):
+        return ""
+    return t[0].upper() + t[1:] if t else ""
+
+
 def form_response(form_type: str, request_id, instruction: str = "") -> dict:
     spec = FORMS.get(form_type) or FORMS["generic"]
-    return {
+    suggested = extract_cr_subject(instruction) if form_type == "compte_rendu" else ""
+    out = {
         "success": False,
         "reason": "needs_form",
         "title": spec["title"],
@@ -161,6 +183,10 @@ def form_response(form_type: str, request_id, instruction: str = "") -> dict:
         "original_instruction": instruction,
         "request_id": request_id,
     }
+    if suggested:
+        out["suggested_subject"] = suggested
+        out["prefill"] = {"sujet": suggested}
+    return out
 
 
 def answers_to_brief(answers: dict) -> str:
