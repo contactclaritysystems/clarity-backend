@@ -7,6 +7,7 @@ et route vers le bon agent avec une instruction claire.
 
 import json
 import os
+import re
 from openai import OpenAI
 from dotenv import load_dotenv
 from app.capabilities import capabilities_prompt_block
@@ -51,7 +52,9 @@ RÈGLES DE ROUTAGE (dans l'ordre)
    - "planning" UNIQUEMENT pour CRÉER / MODIFIER / ANNULER un rendez-vous
      (ex: "ajoute un RDV", "planifie une réunion", "note un rendez-vous avec…")
    - "relance" UNIQUEMENT pour CRÉER un rappel AVEC moment
-     (ex: "fais-moi penser demain 8h", "rappelle-moi de…")
+     (ex: "fais-moi penser demain 8h", "rappelle-moi de rappeler Tony")
+   - "rappelle-moi 30 min avant" / "préviens-moi 1h avant" SANS nouveau motif
+     → "planning" (délai de notif du RDV, pas une Relance)
    - "taches" pour une liste à cocher SANS notif
      (ex: "ajoute une tâche", "à faire : appeler Marc", "note que je dois")
 
@@ -143,6 +146,9 @@ async def run_orchestrator(payload: dict) -> dict:
         allowed = ("mail", "assistant", "redaction", "planning", "relance", "taches")
         if agent not in allowed:
             agent = "assistant"
+        low = instruction.lower()
+        if re.search(r"\d+\s*(min|minute|h|heure)", low) and "avant" in low:
+            agent = "planning"
 
         final_agent = agent
 
@@ -182,6 +188,8 @@ async def run_orchestrator(payload: dict) -> dict:
             agent = "mail"
         elif any(w in lower for w in taches_create):
             agent = "taches"
+        elif re.search(r"\d+\s*(min|minute|h|heure)", lower) and "avant" in lower:
+            agent = "planning"
         elif any(w in lower for w in relance_create):
             agent = "relance"
         elif any(w in lower for w in planning_create):

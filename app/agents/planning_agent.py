@@ -346,6 +346,32 @@ def create_appointment(user_id: str, data: dict) -> Optional[dict]:
                 return None
 
 
+def update_last_appointment_notify(user_id: str, minutes: int) -> bool:
+    sb = get_supabase()
+    if not sb or not user_id:
+        return False
+    try:
+        q = (
+            sb.table("appointments")
+            .select("id")
+            .eq("user_id", user_id)
+            .neq("status", "cancelled")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = q.data or []
+        if not rows:
+            return False
+        sb.table("appointments").update(
+            {"notify_minutes_before": int(minutes)}
+        ).eq("id", rows[0]["id"]).eq("user_id", user_id).execute()
+        return True
+    except Exception as e:
+        print(f"[Planning] update notify: {e}")
+        return False
+
+
 def check_date_consistency(date_str: str, mentioned_weekday: Optional[str]) -> Optional[dict]:
     """Uniquement si un VRAI jour de semaine a été dit et ne correspond pas."""
     if not date_str or not mentioned_weekday:
@@ -385,6 +411,26 @@ async def run_planning_agent(payload: dict) -> dict:
     }
     # Nettoyage vides
     slots = {k: v for k, v in slots.items() if v not in (None, "", "null")}
+    only_notify = parse_notify_before(instruction)
+    looks_only_offset = bool(only_notify is not None and not re.search(
+        r"\b(mardi|lundi|mercredi|jeudi|vendredi|samedi|dimanche|demain|aujourd|rdv|rendez)\b",
+        (instruction or "").lower(),
+    ) and not slots.get("appointment_date"))
+    if looks_only_offset and user_id and only_notify is not None:
+        patched = update_last_appointment_notify(user_id, int(only_notify))
+        if patched:
+            nbi = int(only_notify)
+            extra = "à l'heure" if nbi <= 0 else (
+                f"{nbi} min avant" if nbi < 60 else f"{nbi // 60} h avant"
+            )
+            return {
+                "success": True,
+                "title": "Rappel RDV",
+                "message": f"✅ Rappel {extra} pour votre dernier rendez-vous",
+                "content": f"✅ Rappel {extra} pour votre dernier rendez-vous",
+                "agent": "planning",
+                "request_id": request_id,
+            }
 
     # Historique
     slots.update({k: v for k, v in merge_from_history(history).items() if k not in slots})
