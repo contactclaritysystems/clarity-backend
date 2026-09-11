@@ -239,12 +239,13 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
             continue
         heure = when.strftime("%d/%m/%Y à %H:%M")
         who = (row.get("contact_name") or "").strip()
-        if lead_min <= 0:
+        remain = int((when - now).total_seconds() // 60)
+        if remain <= 0:
             lead_txt = "maintenant"
-        elif lead_min < 60:
-            lead_txt = f"dans {lead_min} min"
+        elif remain < 60:
+            lead_txt = f"dans {remain} min"
         else:
-            h, m = divmod(lead_min, 60)
+            h, m = divmod(remain, 60)
             lead_txt = f"dans {h} h" + (f" {m:02d}" if m else "")
         subject = f"RDV Clarity {lead_txt} : {motif}"
         body = f"{motif}\n\n{heure}" + (f"\nAvec : {who}" if who else "") + "\n\n— Clarity"

@@ -147,7 +147,7 @@ async def run_orchestrator(payload: dict) -> dict:
         if agent not in allowed:
             agent = "assistant"
         low = instruction.lower()
-        if re.search(r"\d+\s*(min|minute|h|heure)", low) and "avant" in low:
+        if re.search(r"\d+\s*(min|minute|h|heure)", low) and re.search(r"avant|dans", low):
             agent = "planning"
 
         final_agent = agent
@@ -188,7 +188,7 @@ async def run_orchestrator(payload: dict) -> dict:
             agent = "mail"
         elif any(w in lower for w in taches_create):
             agent = "taches"
-        elif re.search(r"\d+\s*(min|minute|h|heure)", lower) and "avant" in lower:
+        elif re.search(r"\d+\s*(min|minute|h|heure)", lower) and re.search(r"avant|dans", lower):
             agent = "planning"
         elif any(w in lower for w in relance_create):
             agent = "relance"

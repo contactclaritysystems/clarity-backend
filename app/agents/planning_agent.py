@@ -139,12 +139,18 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
 def parse_notify_before(text: str) -> Optional[int]:
     """'30 min avant' / '1h avant' / 'une heure avant' → minutes. None = défaut Réglages."""
     t = (text or "").lower()
-    if not re.search(r"avant|prévenir|prevenir|rappelle|rappel", t):
+    if not re.search(r"avant|dans|prévenir|prevenir|rappelle|rappel", t):
         return None
     m = re.search(r"(\d+)\s*min(?:ute)?s?\s*avant", t)
     if m:
         return max(0, int(m.group(1)))
+    m = re.search(r"dans\s+(\d+)\s*min(?:ute)?s?", t)
+    if m:
+        return max(0, int(m.group(1)))
     m = re.search(r"(\d+)\s*h(?:eures?)?\s*avant", t)
+    if m:
+        return max(0, int(m.group(1)) * 60)
+    m = re.search(r"dans\s+(\d+)\s*h(?:eures?)?", t)
     if m:
         return max(0, int(m.group(1)) * 60)
     if re.search(r"une\s+heure\s+avant|1\s*h\s*avant", t):
@@ -429,6 +435,7 @@ async def run_planning_agent(payload: dict) -> dict:
                 "message": f"✅ Rappel {extra} pour votre dernier rendez-vous",
                 "content": f"✅ Rappel {extra} pour votre dernier rendez-vous",
                 "agent": "planning",
+                "appointment": {"notify_minutes_before": nbi},
                 "request_id": request_id,
             }
 
@@ -627,6 +634,7 @@ async def run_planning_agent(payload: dict) -> dict:
                 "time": slots["appointment_time"],
                 "contact_name": contact_name,
                 "title": slots.get("title"),
+                "notify_minutes_before": slots.get("notify_minutes_before"),
             },
             "request_id": request_id,
         }
