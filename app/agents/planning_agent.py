@@ -141,10 +141,10 @@ def parse_notify_before(text: str) -> Optional[int]:
     t = (text or "").lower()
     if not re.search(r"avant|dans|prévenir|prevenir|rappelle|rappel", t):
         return None
-    m = re.search(r"(\d+)\s*min(?:ute)?s?\s*avant", t)
+    m = re.search(r"(?:le\s+)?(\d+)\s*(?:min(?:ute)?s?|mn)\s*avant", t)
     if m:
         return max(0, int(m.group(1)))
-    m = re.search(r"dans\s+(\d+)\s*min(?:ute)?s?", t)
+    m = re.search(r"dans\s+(?:le\s+)?(\d+)\s*(?:min(?:ute)?s?|mn)", t)
     if m:
         return max(0, int(m.group(1)))
     m = re.search(r"(\d+)\s*h(?:eures?)?\s*avant", t)
@@ -368,7 +368,17 @@ def update_last_appointment_notify(user_id: str, minutes: int) -> bool:
         )
         rows = q.data or []
         if not rows:
-            return False
+            q = (
+                sb.table("appointments")
+                .select("id")
+                .eq("user_id", user_id)
+                .order("appointment_date", desc=True)
+                .limit(1)
+                .execute()
+            )
+            rows = q.data or []
+        if not rows:
+            return None
         sb.table("appointments").update(
             {"notify_minutes_before": int(minutes)}
         ).eq("id", rows[0]["id"]).eq("user_id", user_id).execute()
