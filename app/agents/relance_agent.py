@@ -304,10 +304,6 @@ async def run_relance_agent(payload: dict) -> dict:
     nb = parse_notify_before(instruction)
     offset_only = bool(
         nb is not None
-        and not re.search(
-            r"\b(de |d'|qu'|que |tony|antoine|outils|appeler|payer)\b",
-            (instruction or "").lower(),
-        )
         and re.search(r"avant|dans \d", (instruction or "").lower())
     )
     if offset_only and user_id:

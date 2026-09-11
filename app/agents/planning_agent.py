@@ -139,7 +139,7 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
 def parse_notify_before(text: str) -> Optional[int]:
     """'30 min avant' / '1h avant' / 'une heure avant' → minutes. None = défaut Réglages."""
     t = (text or "").lower()
-    if not re.search(r"avant|dans|prévenir|prevenir|rappelle|rappel", t):
+    if not re.search(r"avant|dans|prévenir|prevenir|rappelle|rapelle|rappel|relanc", t):
         return None
     m = re.search(r"(?:le\s+)?(\d+)\s*(?:min(?:ute)?s?|mn)\s*avant", t)
     if m:
@@ -604,11 +604,25 @@ async def run_planning_agent(payload: dict) -> dict:
                 "request_id": request_id,
             }
 
+        nb_final = slots.get("notify_minutes_before")
+        if nb_final is None:
+            nb_final = parse_notify_before(instruction) or parse_notify_before(history)
         created = create_appointment(user_id, {
             **slots,
             "contact_name": contact_name,
             "contact_id": contact_id,
+            "notify_minutes_before": nb_final,
         })
+        if created and nb_final is not None and created.get("id"):
+            try:
+                sb = get_supabase()
+                if sb:
+                    sb.table("appointments").update(
+                        {"notify_minutes_before": int(nb_final)}
+                    ).eq("id", created["id"]).eq("user_id", user_id).execute()
+                    slots["notify_minutes_before"] = int(nb_final)
+            except Exception as e:
+                print(f"[Planning] notify after insert: {e}")
 
         if not created:
             return {
