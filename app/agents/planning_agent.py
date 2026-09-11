@@ -372,10 +372,10 @@ def update_last_appointment_notify(user_id: str, minutes: int) -> bool:
         sb.table("appointments").update(
             {"notify_minutes_before": int(minutes)}
         ).eq("id", rows[0]["id"]).eq("user_id", user_id).execute()
-        return True
+        return rows[0]
     except Exception as e:
         print(f"[Planning] update notify: {e}")
-        return False
+        return None
 
 
 def check_date_consistency(date_str: str, mentioned_weekday: Optional[str]) -> Optional[dict]:
@@ -429,13 +429,14 @@ async def run_planning_agent(payload: dict) -> dict:
             extra = "à l'heure" if nbi <= 0 else (
                 f"{nbi} min avant" if nbi < 60 else f"{nbi // 60} h avant"
             )
+            appt_id = patched.get("id") if isinstance(patched, dict) else None
             return {
                 "success": True,
                 "title": "Rappel RDV",
                 "message": f"✅ Rappel {extra} pour votre dernier rendez-vous",
                 "content": f"✅ Rappel {extra} pour votre dernier rendez-vous",
                 "agent": "planning",
-                "appointment": {"notify_minutes_before": nbi},
+                "appointment": {"id": appt_id, "notify_minutes_before": nbi},
                 "request_id": request_id,
             }
 

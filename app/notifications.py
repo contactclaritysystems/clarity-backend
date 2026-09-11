@@ -41,10 +41,30 @@ def parse_dt(date_s: Any, time_s: Any) -> Optional[datetime]:
     if len(time_s) >= 5:
         time_s = time_s[:5]
     try:
-        dt = datetime.strptime(f"{date_s} {time_s}", "%Y-%m-%d %H:%M")
-        return dt.replace(tzinfo=PARIS)
+        naive = datetime.strptime(f"{date_s} {time_s}", "%Y-%m-%d %H:%M")
+        return naive.replace(tzinfo=PARIS)
     except Exception:
         return None
+
+
+def minutes_until(when: datetime, now: datetime) -> int:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=PARIS)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=PARIS)
+    return int(round((when - now.astimezone(PARIS)).total_seconds() / 60.0))
+
+
+def lead_phrase(when: datetime, now: datetime) -> str:
+    remain = minutes_until(when, now)
+    if remain <= 0:
+        return "maintenant"
+    if remain < 60:
+        return f"dans {remain} min"
+    h, m = divmod(remain, 60)
+    if m == 0:
+        return f"dans {h} h"
+    return f"dans {h} h {m:02d}"
 
 
 def lookup_email(sb: Client, user_id: str, cache: dict) -> Optional[str]:
@@ -239,14 +259,7 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
             continue
         heure = when.strftime("%d/%m/%Y à %H:%M")
         who = (row.get("contact_name") or "").strip()
-        remain = int((when - now).total_seconds() // 60)
-        if remain <= 0:
-            lead_txt = "maintenant"
-        elif remain < 60:
-            lead_txt = f"dans {remain} min"
-        else:
-            h, m = divmod(remain, 60)
-            lead_txt = f"dans {h} h" + (f" {m:02d}" if m else "")
+        lead_txt = lead_phrase(when, now)
         subject = f"RDV Clarity {lead_txt} : {motif}"
         body = f"{motif}\n\n{heure}" + (f"\nAvec : {who}" if who else "") + "\n\n— Clarity"
         result = send_email(email, subject, body)
