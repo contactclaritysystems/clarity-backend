@@ -154,7 +154,7 @@ async def run_orchestrator(payload: dict) -> dict:
 
         return {
             "agent": final_agent,
-            "instruction": data.get("instruction") or instruction,
+            "instruction": instruction,
             "confidence": float(data.get("confidence") or 0.8),
             "secondary_intent": data.get("secondary_intent"),
             "is_followup": bool(data.get("is_followup", False)),
