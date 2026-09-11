@@ -77,6 +77,14 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
         return (base + timedelta(days=1)).strftime("%Y-%m-%d")
     if "aujourd" in text:
         return base.strftime("%Y-%m-%d")
+    if "fin de journée" in text or "fin de journee" in text or "ce soir" in text:
+        return base.strftime("%Y-%m-%d")
+    if "fin de matinée" in text or "fin de matinee" in text:
+        return base.strftime("%Y-%m-%d")
+    if "fin de semaine" in text:
+        wd = base.weekday()
+        days = (4 - wd) if wd <= 4 else (4 + 7 - wd)
+        return (base + timedelta(days=days)).strftime("%Y-%m-%d")
 
     # 25 août / 25 aout / 25/08 / 25-08-2026
     months = {
@@ -149,7 +157,16 @@ def parse_notify_before(text: str) -> Optional[int]:
 
 
 def parse_french_time(instruction: str) -> Optional[str]:
-    text = (instruction or "").lower().replace("h", ":")
+    raw = (instruction or "").lower()
+    if re.search(r"fin de matin[ée]e", raw) and not re.search(r"\d+\s*h", raw):
+        return "11:30"
+    if ("fin de journée" in raw or "fin de journee" in raw) and not re.search(r"\d+\s*h", raw):
+        return "18:00"
+    if "fin de semaine" in raw and not re.search(r"\d+\s*h", raw):
+        return "17:00"
+    if "ce soir" in raw and not re.search(r"\d+\s*h", raw):
+        return "18:00"
+    text = raw.replace("h", ":")
     # 14:00 / 14:30
     m = re.search(r"\b([01]?\d|2[0-3])[:\.]([0-5]\d)\b", text)
     if m:

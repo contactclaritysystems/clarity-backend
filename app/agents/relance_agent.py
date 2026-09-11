@@ -55,8 +55,14 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
         return (base + timedelta(days=1)).strftime("%Y-%m-%d")
     if "aujourd" in text:
         return base.strftime("%Y-%m-%d")
-    if "ce soir" in text:
+    if "ce soir" in text or "fin de journée" in text or "fin de journee" in text:
         return base.strftime("%Y-%m-%d")
+    if "fin de matinée" in text or "fin de matinee" in text:
+        return base.strftime("%Y-%m-%d")
+    if "fin de semaine" in text:
+        wd = base.weekday()
+        days = (4 - wd) if wd <= 4 else (4 + 7 - wd)
+        return (base + timedelta(days=days)).strftime("%Y-%m-%d")
 
     days_map = {
         "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
@@ -78,6 +84,12 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
 
 def parse_french_time(instruction: str) -> Optional[str]:
     text = (instruction or "").lower()
+    if re.search(r"fin de matin[ée]e", text) and not re.search(r"\d+\s*h", text):
+        return "11:30"
+    if ("fin de journée" in text or "fin de journee" in text) and not re.search(r"\d+\s*h", text):
+        return "18:00"
+    if "fin de semaine" in text and not re.search(r"\d+\s*h", text):
+        return "17:00"
     if "ce soir" in text and not re.search(r"\d", text):
         return "18:00"
     if "matin" in text and not re.search(r"\d+\s*h", text):
