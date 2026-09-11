@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any
 from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from app.agents.planning_agent import parse_notify_before, update_last_appointment_notify
 
 load_dotenv()
 MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -300,6 +301,32 @@ async def run_relance_agent(payload: dict) -> dict:
         "reminder_time": payload.get("reminder_time"),
     }
     slots = {k: v for k, v in slots.items() if v not in (None, "", "null")}
+    nb = parse_notify_before(instruction)
+    offset_only = bool(
+        nb is not None
+        and not re.search(
+            r"\b(de |d'|qu'|que |tony|antoine|outils|appeler|payer)\b",
+            (instruction or "").lower(),
+        )
+        and re.search(r"avant|dans \d", (instruction or "").lower())
+    )
+    if offset_only and user_id:
+        patched = update_last_appointment_notify(user_id, int(nb))
+        if patched:
+            nbi = int(nb)
+            extra = f"{nbi} min avant" if nbi < 60 else f"{nbi // 60} h avant"
+            return {
+                "success": True,
+                "title": "Rappel RDV",
+                "message": f"✅ Rappel {extra} pour votre dernier rendez-vous",
+                "content": f"✅ Rappel {extra} pour votre dernier rendez-vous",
+                "agent": "planning",
+                "appointment": {
+                    "id": patched.get("id") if isinstance(patched, dict) else None,
+                    "notify_minutes_before": nbi,
+                },
+                "request_id": request_id,
+            }
     slots.update({k: v for k, v in merge_from_history(history).items() if k not in slots})
 
     if not instruction and not slots.get("reason"):
