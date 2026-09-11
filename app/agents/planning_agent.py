@@ -128,6 +128,26 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
     return None
 
 
+def parse_notify_before(text: str) -> Optional[int]:
+    """'30 min avant' / '1h avant' / 'une heure avant' → minutes. None = défaut Réglages."""
+    t = (text or "").lower()
+    if not re.search(r"avant|prévenir|prevenir|rappelle|rappel", t):
+        return None
+    m = re.search(r"(\d+)\s*min(?:ute)?s?\s*avant", t)
+    if m:
+        return max(0, int(m.group(1)))
+    m = re.search(r"(\d+)\s*h(?:eures?)?\s*avant", t)
+    if m:
+        return max(0, int(m.group(1)) * 60)
+    if re.search(r"une\s+heure\s+avant|1\s*h\s*avant", t):
+        return 60
+    if re.search(r"quart\s+d['’ ]?heure\s+avant|15\s*min", t) and "avant" in t:
+        return 15
+    if re.search(r"à l['’]?heure|a l['’]?heure|pile", t) and re.search(r"rappel|préven", t):
+        return 0
+    return None
+
+
 def parse_french_time(instruction: str) -> Optional[str]:
     text = (instruction or "").lower().replace("h", ":")
     # 14:00 / 14:30
@@ -282,6 +302,11 @@ def create_appointment(user_id: str, data: dict) -> Optional[dict]:
         "appointment_time": (data.get("appointment_time") or "10:00")[:5],
         "status": "scheduled",
     }
+    if data.get("notify_minutes_before") is not None:
+        try:
+            row["notify_minutes_before"] = int(data["notify_minutes_before"])
+        except Exception:
+            pass
     try:
         if data.get("contact_id"):
             row["contact_id"] = data["contact_id"]
@@ -295,7 +320,13 @@ def create_appointment(user_id: str, data: dict) -> Optional[dict]:
             return (result.data or [row])[0]
         except Exception as e2:
             print(f"[Planning] insert retry: {e2}")
-            return None
+            try:
+                row.pop("notify_minutes_before", None)
+                result = sb.table("appointments").insert(row).execute()
+                return (result.data or [row])[0]
+            except Exception as e3:
+                print(f"[Planning] insert retry2: {e3}")
+                return None
 
 
 def check_date_consistency(date_str: str, mentioned_weekday: Optional[str]) -> Optional[dict]:
@@ -333,6 +364,7 @@ async def run_planning_agent(payload: dict) -> dict:
         "appointment_date": payload.get("appointment_date"),
         "appointment_time": payload.get("appointment_time"),
         "contact_id": payload.get("contact_id"),
+        "notify_minutes_before": payload.get("notify_minutes_before"),
     }
     # Nettoyage vides
     slots = {k: v for k, v in slots.items() if v not in (None, "", "null")}
@@ -371,6 +403,9 @@ async def run_planning_agent(payload: dict) -> dict:
                 slots["title"] = llm["title"]
             if llm.get("description"):
                 slots["description"] = llm["description"]
+            nb = parse_notify_before(instruction) or parse_notify_before(history)
+            if nb is not None and slots.get("notify_minutes_before") in (None, "", "null"):
+                slots["notify_minutes_before"] = nb
 
             # Cohérence jour / date
             inconsistency = check_date_consistency(
@@ -503,7 +538,17 @@ async def run_planning_agent(payload: dict) -> dict:
 
         when = format_fr_date(slots["appointment_date"], slots["appointment_time"])
         who = f" avec {contact_name}" if contact_name else ""
-        message = f"✅ RDV noté{who} — {when}"
+        extra = ""
+        nb = slots.get("notify_minutes_before")
+        if nb is not None:
+            try:
+                nbi = int(nb)
+                extra = " · rappel à l'heure" if nbi <= 0 else (
+                    f" · rappel {nbi} min avant" if nbi < 60 else f" · rappel {nbi // 60} h avant"
+                )
+            except Exception:
+                extra = ""
+        message = f"✅ RDV noté{who} — {when}{extra}"
 
         update_progress(request_id, "ready", when)
 

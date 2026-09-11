@@ -215,12 +215,19 @@ def process_appointments(sb: Client, now: datetime, cache: dict, debug: list) ->
         if not when:
             continue
         off = user_offsets(sb, str(row.get("user_id") or ""), cache)
-        if off["appointment"] in ("off", "none", "false", "digest"):
-            continue
-        try:
-            lead_min = int(off["appointment"])
-        except Exception:
-            lead_min = 60
+        per = row.get("notify_minutes_before")
+        if per is not None and str(per) != "":
+            try:
+                lead_min = int(per)
+            except Exception:
+                lead_min = 60
+        else:
+            if off["appointment"] in ("off", "none", "false", "digest"):
+                continue
+            try:
+                lead_min = int(off["appointment"])
+            except Exception:
+                lead_min = 60
         if now < when - timedelta(minutes=lead_min):
             continue
         if now - when > timedelta(minutes=20):
