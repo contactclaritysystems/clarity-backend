@@ -484,6 +484,9 @@ def process_digests(sb: Client, now: datetime, cache: dict, debug: list) -> List
             debug.append(f"digest no-email {uid}")
             continue
         rappels, rdvs = day_items(sb, uid, today)
+        if not rappels and not rdvs:
+            debug.append(f"digest skip empty {uid}")
+            continue
         day_fr = now.strftime("%d/%m/%Y")
         subject, body = format_digest(day_fr, rappels, rdvs)
         result = send_email(email, subject, body)
