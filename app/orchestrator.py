@@ -147,7 +147,26 @@ async def run_orchestrator(payload: dict) -> dict:
         if agent not in allowed:
             agent = "assistant"
         low = instruction.lower()
-        if re.search(r"\d+\s*(min|minute|h|heure)", low) and re.search(r"avant|dans", low):
+        looks_mail = bool(
+            re.search(
+                r"\b(envoie|envoyer|envoi|mail|e-mail|relance |relancer |message (à|a|pour)|préviens|previens|dis-lui|dis lui)\b",
+                low,
+            )
+            and not re.search(r"\b(insta|instagram|linkedin|facebook|stories)\b", low)
+        )
+        looks_rdv = bool(
+            re.search(r"\b(rdv|rendez-vous|rendez vous|réunion|reunion)\b", low)
+            and re.search(r"\b(note|ajoute|crée|cree|prend|prends|planifie|donne|fix|avec)\b", low)
+            or re.search(r"\b(rdv|rendez-vous)\b.+\b(avec|demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|\d+\s*h)\b", low)
+        )
+        looks_offset = bool(
+            re.search(r"\d+\s*(min|minute|h|heure)", low) and re.search(r"avant|dans", low)
+        )
+        secondary = data.get("secondary_intent")
+        if looks_mail and looks_rdv:
+            agent = "planning"
+            secondary = "mail"
+        elif looks_offset and not looks_mail:
             agent = "planning"
 
         final_agent = agent
@@ -156,7 +175,7 @@ async def run_orchestrator(payload: dict) -> dict:
             "agent": final_agent,
             "instruction": instruction,
             "confidence": float(data.get("confidence") or 0.8),
-            "secondary_intent": data.get("secondary_intent"),
+            "secondary_intent": secondary,
             "is_followup": bool(data.get("is_followup", False)),
             "reasoning": data.get("reasoning") or "",
             "requested_agent": agent,
