@@ -7,6 +7,7 @@ import json
 import os
 import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -53,6 +54,33 @@ def update_progress(request_id: Optional[str], status: str, message: str = ""):
 # Dates FR déterministes
 # ---------------------------------------------------------------------------
 
+def _now_paris() -> datetime:
+    try:
+        return datetime.now(ZoneInfo("Europe/Paris"))
+    except Exception:
+        return datetime.now()
+
+
+def bump_weekday_if_past(date_str: str, time_str: Optional[str], instruction: str) -> str:
+    """Mardi 9h dit le mardi soir → mardi suivant, jamais une heure déjà passée."""
+    if not date_str:
+        return date_str
+    low = (instruction or "").lower()
+    if not re.search(r"\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b", low):
+        return date_str
+    if re.search(r"\b(aujourd|ce jour)\b", low):
+        return date_str
+    try:
+        hm = (time_str or "00:00")[:5]
+        dt = datetime.strptime(f"{str(date_str)[:10]} {hm}", "%Y-%m-%d %H:%M")
+        now = _now_paris().replace(tzinfo=None)
+        if dt <= now:
+            return (dt + timedelta(days=7)).strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return date_str
+
+
 def next_weekday(base: datetime, target_weekday: int, prochain: bool = False) -> datetime:
     current = base.weekday()
     days_ahead = target_weekday - current
@@ -67,7 +95,7 @@ def next_weekday(base: datetime, target_weekday: int, prochain: bool = False) ->
 
 def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Optional[str]:
     if base is None:
-        base = datetime.now()
+        base = _now_paris().replace(tzinfo=None)
     base = base.replace(hour=0, minute=0, second=0, microsecond=0)
     text = (instruction or "").lower()
 
@@ -551,6 +579,13 @@ async def run_planning_agent(payload: dict) -> dict:
                 "context_hint": f"RDV partial: {partial_tag}",
                 "request_id": request_id,
             }
+
+        if slots.get("appointment_date") and slots.get("appointment_time"):
+            slots["appointment_date"] = bump_weekday_if_past(
+                slots["appointment_date"],
+                slots["appointment_time"],
+                instruction + " " + (history or ""),
+            )
 
         if not slots.get("appointment_time"):
             return {
