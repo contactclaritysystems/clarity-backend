@@ -188,7 +188,11 @@ RÈGLES :
    Dates TOUJOURS en français comme dans le contexte (mercredi 16 septembre 2026 à 15h).
    INTERDIT : 16/09/2026, 2026-09-16, 15:00 seul.
 5. Pas de phrase de fin commerciale ("n'hésitez pas", "je reste à votre disposition").
-6. Devis, facture, WhatsApp, agenda Google : dites en 2 phrases que c'est bientôt, sans proposer un faux devis.
+6. Devis *à créer*, WhatsApp, agenda Google : dites en 2 phrases que c'est bientôt.
+6b. DOCUMENT JOINT : basez-vous UNIQUEMENT sur le texte/photo fourni.
+   Structure : type de document, résumé simple, points importants, zones illisibles.
+   INTERDIT d'inventer un article, un montant ou une date absents du document.
+   Questions de suivi = toujours CE document, sauf si l'utilisateur change de sujet.
 7. DROIT / FISCALITÉ / TRAVAIL / OBLIGATIONS LÉGALES :
    - Réponse générale et prudente uniquement. Jamais « la loi impose X » comme un verdict.
    - Terminez TOUJOURS par exactement :
@@ -405,12 +409,94 @@ def web_search(query: str, max_results: int = 5) -> str:
     return "\n\n".join(blocks) if blocks else ""
 
 
+def _decode_b64(raw: str) -> bytes:
+    import base64
+    s = (raw or "").strip()
+    if "," in s and s.strip().startswith("data:"):
+        s = s.split(",", 1)[1]
+    return base64.b64decode(s)
+
+
+def extract_pdf_bytes(data: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+        import io
+        reader = PdfReader(io.BytesIO(data))
+        pages = []
+        for i, page in enumerate(reader.pages[:20]):
+            pages.append(page.extract_text() or "")
+        return "\n".join(pages).strip()
+    except Exception as e:
+        print(f"[Assistant] pdf: {e}")
+        return ""
+
+
+def describe_image_b64(b64: str, mime: str, question: str) -> str:
+    try:
+        url = b64 if str(b64).startswith("data:") else f"data:{mime or 'image/jpeg'};base64,{b64}"
+        r = get_client().chat.completions.create(
+            model=MODEL,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": (
+                        "Lis ce document (photo). Extraire tout le texte visible "
+                        "et un court résumé factuel. N'invente rien. "
+                        f"Demande : {question or 'analyse'}"
+                    )},
+                    {"type": "image_url", "image_url": {"url": url}},
+                ],
+            }],
+            max_tokens=1200,
+            temperature=0.1,
+        )
+        return (r.choices[0].message.content or "").strip()
+    except Exception as e:
+        print(f"[Assistant] vision: {e}")
+        return ""
+
+
+def load_documents_block(payload: dict) -> str:
+    ready = (payload.get("document_extract") or "").strip()
+    if ready:
+        return ready[:12000]
+    atts = payload.get("attachments") or payload.get("files") or []
+    if not isinstance(atts, list) or not atts:
+        return ""
+    chunks = []
+    for att in atts[:3]:
+        if not isinstance(att, dict):
+            continue
+        name = att.get("filename") or att.get("name") or "fichier"
+        mime = (att.get("mime") or att.get("type") or "").lower()
+        b64 = att.get("content_b64") or att.get("content") or ""
+        if not b64:
+            continue
+        try:
+            raw = _decode_b64(b64)
+        except Exception:
+            chunks.append(f"[{name}] fichier illisible")
+            continue
+        if "pdf" in mime or name.lower().endswith(".pdf"):
+            txt = extract_pdf_bytes(raw)
+            chunks.append(f"=== PDF {name} ===\n{txt or '(texte non extractible)'}")
+        elif mime.startswith("image/") or name.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".heic")):
+            desc = describe_image_b64(b64, mime or "image/jpeg", payload.get("instruction") or "")
+            chunks.append(f"=== PHOTO {name} ===\n{desc or '(image non lue)'}")
+        else:
+            chunks.append(f"[{name}] type non lu en V1 ({mime})")
+    return "\n\n".join(chunks)[:12000]
+
+
 async def run_assistant_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
     user_id = payload.get("user_id")
     user_name = (payload.get("user_name") or "").strip()
     history = payload.get("conversation_history") or ""
+    docs = load_documents_block(payload)
+    if not instruction and docs:
+        instruction = "Analysez ce document."
 
     if not instruction:
         return {
@@ -427,7 +513,9 @@ async def run_assistant_agent(payload: dict) -> dict:
         today_fr = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M")
 
         web_block = ""
-        if needs_web_search(instruction):
+        if docs:
+            web_block = ""
+        elif needs_web_search(instruction):
             raw = web_search(instruction)
             if raw:
                 web_block = f"=== RECHERCHE WEB (faits récupérés maintenant) ===\n{raw}\n\n"
@@ -443,6 +531,11 @@ async def run_assistant_agent(payload: dict) -> dict:
             f"Date/heure actuelle : {today_fr}\n\n"
             f"=== CONTEXTE CLARITY (données réelles) ===\n{context}\n\n"
         )
+        if docs:
+            user_msg += (
+                "=== DOCUMENT FOURNI (source unique pour cette question) ===\n"
+                f"{docs}\n\n"
+            )
         if web_block:
             user_msg += web_block
         if history:
@@ -460,16 +553,16 @@ async def run_assistant_agent(payload: dict) -> dict:
         )
         answer = (response.choices[0].message.content or "").strip()
         low_i = instruction.lower()
-        coming = any(k in low_i for k in (
-            "devis", "facture", "whatsapp", "chantier", "google calendar",
-            "agenda google", "pièce jointe", "piece jointe",
+        coming = (not docs) and any(k in low_i for k in (
+            "whatsapp", "chantier", "google calendar",
+            "agenda google",
         ))
         if not answer:
             answer = "Je n'ai pas pu formuler de réponse. Reformulez votre question."
 
         import re
         answer = re.sub(r"\*\*", "", answer)
-        if is_legal_sensitive(instruction):
+        if is_legal_sensitive(instruction) or is_legal_sensitive(docs):
             if LEGAL_DISCLAIMER.lower() not in answer.lower():
                 answer = (answer.rstrip() + "\n\n" + LEGAL_DISCLAIMER).strip()
         return {
@@ -478,6 +571,7 @@ async def run_assistant_agent(payload: dict) -> dict:
             "message": answer,
             "content": answer,
             "coming_soon": bool(coming),
+            "document_extract": docs[:8000] if docs else None,
             "request_id": request_id,
         }
     except Exception as e:
