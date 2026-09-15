@@ -23,6 +23,26 @@ def get_client():
     return OpenAI(api_key=api_key)
 
 
+JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+MOIS = [
+    "", "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+]
+
+
+def format_fr_humain(date_s: str, time_s: str = "") -> str:
+    try:
+        d = datetime.strptime(str(date_s)[:10], "%Y-%m-%d")
+        t = str(time_s or "")[:5]
+        heure = ""
+        if t and t[0].isdigit():
+            h, m = t.split(":")[:2]
+            heure = f" à {int(h)}h" + (f"{m}" if m != "00" else "")
+        return f"{JOURS[d.weekday()]} {d.day} {MOIS[d.month]} {d.year}{heure}"
+    except Exception:
+        return f"{date_s} {time_s}".strip()
+
+
 def get_supabase() -> Optional[Client]:
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_KEY")
@@ -61,12 +81,10 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
         if rows:
             lines.append("Rendez-vous (14 prochains jours) :")
             for a in rows:
-                d = a.get("appointment_date") or "?"
-                if len(str(d)) >= 10:
-                    y, m, day = str(d)[:10].split("-")
-                    d = f"{day}/{m}/{y}"
-                t = a.get("appointment_time") or ""
-                t = str(t)[:5]
+                d = format_fr_humain(
+                    a.get("appointment_date") or "",
+                    a.get("appointment_time") or "",
+                )
                 title = a.get("title") or "RDV"
                 contact = a.get("contact_name") or ""
                 st = (a.get("status") or "").lower()
@@ -79,8 +97,6 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
                     "canceled": "annulé",
                 }.get(st, "")
                 bit = f"- {d}"
-                if t:
-                    bit += f" à {t}"
                 bit += f" — {title}"
                 if contact:
                     bit += f" avec {contact}"
@@ -169,6 +185,8 @@ RÈGLES :
    Si le web est vide : deux phrases max, sans « dernière mise à jour », sans année de coupure, sans inventer l'actu.
 3. Jamais de markdown (**gras**, puces *). Texte simple, listes avec des tirets.
 4. Jamais les codes done / scheduled / pending. Pas "(à venir)" si c'est déjà dit par la date.
+   Dates TOUJOURS en français comme dans le contexte (mercredi 16 septembre 2026 à 15h).
+   INTERDIT : 16/09/2026, 2026-09-16, 15:00 seul.
 5. Pas de phrase de fin commerciale ("n'hésitez pas", "je reste à votre disposition").
 6. Devis, facture, WhatsApp, agenda Google : dites en 2 phrases que c'est bientôt, sans proposer un faux devis.
 7. DROIT / FISCALITÉ / TRAVAIL / OBLIGATIONS LÉGALES :
