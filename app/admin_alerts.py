@@ -64,12 +64,40 @@ def claim(sb: Client, user_id: str, kind: str) -> bool:
 
 
 def display_name(prof: dict) -> str:
-    for k in ("first_name", "prenom", "full_name", "name", "display_name"):
+    for k in ("firstname", "first_name", "prenom", "full_name", "name", "display_name"):
         v = (prof.get(k) or "").strip()
         if v:
             return v.split()[0]
     email = (prof.get("email") or "").strip()
     return email.split("@")[0] if email else "—"
+
+
+def prenom_from_auth(sb: Client, email: str) -> str:
+    """Lit options.data.prenom stocké dans auth.users.raw_user_meta_data."""
+    try:
+        admin = getattr(sb.auth, "admin", None)
+        if not admin or not email:
+            return ""
+        res = admin.list_users()
+        users = getattr(res, "users", None) or getattr(res, "data", None) or []
+        if isinstance(res, dict):
+            users = res.get("users") or res.get("data") or []
+        for u in users:
+            umail = (getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else "") or "").lower()
+            if umail != email.lower():
+                continue
+            meta = getattr(u, "user_metadata", None) or {}
+            if isinstance(u, dict):
+                meta = u.get("user_metadata") or u.get("raw_user_meta_data") or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            for k in ("prenom", "firstname", "first_name", "name", "full_name"):
+                v = str(meta.get(k) or "").strip()
+                if v:
+                    return v.split()[0]
+    except Exception as e:
+        print(f"[AdminAlert] auth prenom: {e}")
+    return ""
 
 
 def hour_now() -> str:
@@ -85,8 +113,8 @@ def notify_signup(user_id: str, email: str = "", prenom: str = "") -> dict:
         email = (user_id or "").strip()
     if "@" not in email:
         return {"ok": False, "reason": "no_email"}
-    if not prenom or prenom in ("—", user_id):
-        prenom = email.split("@")[0]
+    if not prenom or prenom in ("—", user_id) or prenom == email.split("@")[0]:
+        prenom = prenom_from_auth(sb, email) or email.split("@")[0]
     if not claim(sb, email, "signup"):
         return {"ok": True, "skipped": True}
     text = (
