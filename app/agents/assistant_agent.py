@@ -396,9 +396,23 @@ def search_duckduckgo(query: str) -> str:
         return ""
 
 
+def search_company_fr(query: str) -> str:
+    try:
+        q = f"{query} société pappers societe.com radiation fermée"
+        raw = search_duckduckgo(q)
+        if raw:
+            return "Sociétés FR :\n" + raw
+    except Exception as e:
+        print(f"[company-fr] {e}")
+    return ""
+
+
 def web_search(query: str, max_results: int = 5) -> str:
     """Agrège plusieurs sources gratuites."""
     blocks = []
+    co = search_company_fr(query)
+    if co:
+        blocks.append(co)
     crypto = search_crypto(query)
     if crypto:
         blocks.append(crypto)
@@ -721,6 +735,31 @@ async def run_assistant_agent(payload: dict) -> dict:
             max_tokens=900,
         )
         answer = (response.choices[0].message.content or "").strip()
+        lie = (
+            "recherche" in answer.lower()
+            and any(
+                x in answer.lower()
+                for x in (
+                    "je ne peux pas",
+                    "pas effectuer",
+                    "n'ai pas accès",
+                    "pas d'accès à internet",
+                    "pas acces a internet",
+                    "en direct sur le web",
+                )
+            )
+        )
+        if lie:
+            if web_block and "Aucun extrait" not in web_block and "faits récupérés" in web_block:
+                answer = (
+                    "Voici ce que la recherche donne :\n"
+                    + web_block.replace("=== RECHERCHE WEB (faits récupérés maintenant) ===", "").strip()
+                )
+            else:
+                answer = (
+                    "J'ai cherché. Je n'ai rien trouvé de solide "
+                    "sur cette société pour le moment."
+                )
         low_i = instruction.lower()
         coming = (not docs) and any(k in low_i for k in (
             "whatsapp", "chantier", "google calendar",
