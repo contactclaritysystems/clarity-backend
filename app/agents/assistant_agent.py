@@ -511,9 +511,10 @@ def describe_image_b64(b64: str, mime: str, question: str) -> str:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": (
-                        "Lis ce document (photo). Extraire tout le texte visible "
-                        "et un court résumé factuel. N'invente rien. "
-                        f"Demande : {question or 'analyse'}"
+                        "Décris UNIQUEMENT cette image. "
+                        "Compte les personnes une par une (enfant ou adulte). "
+                        "N'invente personne en plus. "
+                        f"Question : {question or 'décris'}"
                     )},
                     {"type": "image_url", "image_url": {"url": url}},
                 ],
