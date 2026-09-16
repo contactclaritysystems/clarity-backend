@@ -431,6 +431,25 @@ def extract_pdf_bytes(data: bytes) -> str:
         return ""
 
 
+def pdf_pages_as_jpeg_b64(data: bytes, max_pages: int = 3) -> list:
+    """PDF scanné : rend les 1ères pages en JPEG pour la vision."""
+    out = []
+    try:
+        import io
+        import base64
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        for i in range(min(max_pages, doc.page_count)):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)
+            bio = io.BytesIO(pix.tobytes("jpeg"))
+            out.append(base64.b64encode(bio.getvalue()).decode("ascii"))
+        doc.close()
+    except Exception as e:
+        print(f"[Assistant] pdf-render: {e}")
+    return out
+
+
 def describe_image_b64(b64: str, mime: str, question: str) -> str:
     try:
         url = b64 if str(b64).startswith("data:") else f"data:{mime or 'image/jpeg'};base64,{b64}"
@@ -464,7 +483,7 @@ def load_documents_block(payload: dict) -> str:
     if not isinstance(atts, list) or not atts:
         return ""
     chunks = []
-    for att in atts[:3]:
+    for att in atts[:5]:
         if not isinstance(att, dict):
             continue
         name = att.get("filename") or att.get("name") or "fichier"
@@ -479,7 +498,28 @@ def load_documents_block(payload: dict) -> str:
             continue
         if "pdf" in mime or name.lower().endswith(".pdf"):
             txt = extract_pdf_bytes(raw)
-            chunks.append(f"=== PDF {name} ===\n{txt or '(texte non extractible)'}")
+            if len(txt) >= 80:
+                chunks.append(f"=== PDF {name} ===\n{txt}")
+            else:
+                pages = pdf_pages_as_jpeg_b64(raw, 3)
+                if not pages:
+                    chunks.append(
+                        f"=== PDF {name} ===\n"
+                        "(PDF image, lecture impossible pour l'instant. "
+                        "Prenez une photo nette d'une page.)"
+                    )
+                else:
+                    bits = []
+                    for i, jb64 in enumerate(pages, 1):
+                        bits.append(
+                            describe_image_b64(
+                                jb64,
+                                "image/jpeg",
+                                payload.get("instruction") or "Lis tout le texte visible",
+                            )
+                            or f"(page {i} non lue)"
+                        )
+                    chunks.append(f"=== PDF {name} (lu comme image) ===\n" + "\n\n".join(bits))
         elif mime.startswith("image/") or name.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".heic")):
             desc = describe_image_b64(b64, mime or "image/jpeg", payload.get("instruction") or "")
             chunks.append(f"=== PHOTO {name} ===\n{desc or '(image non lue)'}")
