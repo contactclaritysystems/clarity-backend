@@ -148,6 +148,38 @@ def process_admin_alerts(sb: Client, now: datetime, debug: list) -> dict:
         r = notify_signup(uid, p.get("email") or "", display_name(p))
         if r.get("sent"):
             out["signups"].append(p.get("email") or uid)
+    # Fallback : beaucoup de comptes n'ont qu'une ligne subscriptions
+    try:
+        sub_new = (
+            sb.table("subscriptions")
+            .select("*")
+            .gte("created_at", since)
+            .limit(80)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        debug.append(f"admin subs signup: {e}")
+        try:
+            sub_new = sb.table("subscriptions").select("*").limit(40).execute().data or []
+        except Exception as e2:
+            debug.append(f"admin subs signup2: {e2}")
+            sub_new = []
+    for s in sub_new:
+        uid = str(s.get("user_id") or s.get("id") or "")
+        if not uid:
+            continue
+        email = s.get("email") or s.get("user_email") or ""
+        prenom = (
+            s.get("first_name")
+            or s.get("prenom")
+            or s.get("name")
+            or (email.split("@")[0] if email else "")
+        )
+        r = notify_signup(uid, email, prenom)
+        if r.get("sent"):
+            out["signups"].append(email or uid)
     # Abos
     try:
         subs = sb.table("subscriptions").select("*").limit(120).execute().data or []
