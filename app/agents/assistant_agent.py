@@ -500,15 +500,15 @@ def describe_image_b64(b64: str, mime: str, question: str) -> str:
 
 
 def load_documents_block(payload: dict) -> str:
+    prev = (payload.get("document_extract") or "").strip()
     atts = payload.get("attachments") or payload.get("files") or []
-    if isinstance(atts, list) and any(isinstance(a, dict) and (a.get("content_b64") or a.get("content")) for a in atts):
-        ready = ""
-    else:
-        ready = (payload.get("document_extract") or "").strip()
-        if ready:
-            return ready[:12000]
+    has_new = isinstance(atts, list) and any(
+        isinstance(a, dict) and (a.get("content_b64") or a.get("content")) for a in atts
+    )
+    if not has_new:
+        return prev[:12000]
     if not isinstance(atts, list) or not atts:
-        return ""
+        return prev[:12000]
     chunks = []
     for att in atts[:5]:
         if not isinstance(att, dict):
@@ -553,7 +553,10 @@ def load_documents_block(payload: dict) -> str:
             chunks.append(f"=== PHOTO {name} ===\n{desc or '(image non lue)'}")
         else:
             chunks.append(f"[{name}] type non lu en V1 ({mime})")
-    return "\n\n".join(chunks)[:12000]
+    nouveau = "\n\n".join(chunks).strip()
+    if prev and nouveau:
+        return (prev + "\n\n=== FICHIER AJOUTÉ ===\n" + nouveau)[:12000]
+    return (nouveau or prev)[:12000]
 
 
 async def run_assistant_agent(payload: dict) -> dict:
