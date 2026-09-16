@@ -681,14 +681,7 @@ async def run_assistant_agent(payload: dict) -> dict:
         today_fr = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M")
 
         web_block = ""
-        low_q = (instruction or "").lower()
-        wants_web_on_doc = any(k in low_q for k in (
-            "réputation", "reputation", "avis", "google",
-            "fiable", "arnaque", "entreprise",
-        ))
-        if docs and not wants_web_on_doc:
-            web_block = ""
-        elif needs_web_search(instruction) or wants_web_on_doc:
+        if needs_web_search(instruction):
             q = instruction
             if docs:
                 q = instruction + " " + docs[:300]
