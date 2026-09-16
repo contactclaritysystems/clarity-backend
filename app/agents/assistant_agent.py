@@ -425,16 +425,31 @@ def _decode_b64(raw: str) -> bytes:
 
 
 def extract_pdf_bytes(data: bytes) -> str:
+    if not data or len(data) < 20:
+        return ""
+    # PyMuPDF : mieux que pypdf sur les devis logiciels
+    try:
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages = []
+        for i in range(min(20, doc.page_count)):
+            pages.append(doc.load_page(i).get_text("text") or "")
+        doc.close()
+        txt = "\n".join(pages).strip()
+        if len(txt) >= 40:
+            return txt
+    except Exception as e:
+        print(f"[Assistant] pdf-fitz-text: {e}")
     try:
         from pypdf import PdfReader
         import io
         reader = PdfReader(io.BytesIO(data))
         pages = []
-        for i, page in enumerate(reader.pages[:20]):
+        for page in reader.pages[:20]:
             pages.append(page.extract_text() or "")
         return "\n".join(pages).strip()
     except Exception as e:
-        print(f"[Assistant] pdf: {e}")
+        print(f"[Assistant] pdf-pypdf: {e}")
         return ""
 
 
@@ -449,7 +464,7 @@ def pdf_pages_as_jpeg_b64(data: bytes, max_pages: int = 3):
         out = []
         for i in range(min(max_pages, doc.page_count)):
             page = doc.load_page(i)
-            pix = page.get_pixmap(matrix=fitz.Matrix(1.4, 1.4), alpha=False)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
             out.append(base64.b64encode(pix.tobytes("jpeg")).decode("ascii"))
         doc.close()
         if out:
@@ -554,8 +569,15 @@ def load_documents_block(payload: dict) -> str:
             chunks.append(f"[{name}] fichier illisible")
             continue
         if "pdf" in mime or name.lower().endswith(".pdf"):
+            if not raw.startswith(b"%PDF"):
+                chunks.append(
+                    f"=== PDF {name} ===\n"
+                    f"Fichier incomplet ou tronqué ({len(raw)} octets). "
+                    "Renvoyer le PDF (moins de 8 Mo)."
+                )
+                continue
             txt = extract_pdf_bytes(raw)
-            if len(txt) >= 80:
+            if len(txt) >= 40:
                 chunks.append(f"=== PDF {name} ===\n{txt}")
             else:
                 pages, perr = pdf_pages_as_jpeg_b64(raw, 3)
