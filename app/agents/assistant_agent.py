@@ -712,6 +712,9 @@ async def run_assistant_agent(payload: dict) -> dict:
             "content": answer,
             "coming_soon": bool(coming),
             "document_extract": docs[:8000] if docs else None,
+            "files_received": len(img_parts) + (
+                1 if docs and not img_parts else 0
+            ),
             "request_id": request_id,
         }
     except Exception as e:
