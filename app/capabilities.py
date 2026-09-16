@@ -29,6 +29,16 @@ AVAILABLE = [
         "label": "Assistant",
         "desc": "Répondre à vos questions, résumer votre journée, retrouver un contact ou une info.",
     },
+    {
+        "key": "taches",
+        "label": "Tâches",
+        "desc": "Noter une tâche à faire, sans notification (liste Planning).",
+    },
+    {
+        "key": "documents",
+        "label": "Documents",
+        "desc": "Joindre une photo ou un PDF (trombone à côté du champ). Clarity lit le fichier, répond à votre question, ou l'envoie par mail.",
+    },
 ]
 
 COMING_SOON = [
@@ -43,14 +53,9 @@ COMING_SOON = [
         "desc": "Créer, suivre et envoyer vos factures directement depuis Clarity.",
     },
     {
-        "key": "documents",
-        "label": "Documents",
-        "desc": "Retrouver et exploiter vos documents sans avoir à les chercher vous-même.",
-    },
-    {
-        "key": "ocr",
-        "label": "Lecture automatique de documents",
-        "desc": "Prendre une photo d'une facture ou d'un bon de commande, Clarity en extrait les informations utiles.",
+        "key": "coffre",
+        "label": "Coffre documents",
+        "desc": "Retrouver plus tard un fichier déjà envoyé, sans le rechercher à la main.",
     },
     {
         "key": "crm",
@@ -58,9 +63,9 @@ COMING_SOON = [
         "desc": "Centraliser toutes les informations de vos clients au même endroit.",
     },
     {
-        "key": "taches",
-        "label": "Tâches",
-        "desc": "Suivre ce qu'il reste à faire, tout à la voix (au-delà des rappels déjà disponibles).",
+        "key": "taches_avancees",
+        "label": "Tâches avancées",
+        "desc": "Échéances, priorités et vue d'ensemble au-delà de la liste simple.",
     },
     {
         "key": "recherche",
