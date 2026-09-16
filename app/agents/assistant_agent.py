@@ -735,18 +735,20 @@ async def run_assistant_agent(payload: dict) -> dict:
             max_tokens=900,
         )
         answer = (response.choices[0].message.content or "").strip()
-        lie = (
-            "recherche" in answer.lower()
-            and any(
-                x in answer.lower()
-                for x in (
-                    "je ne peux pas",
-                    "pas effectuer",
-                    "n'ai pas accès",
-                    "pas d'accès à internet",
-                    "pas acces a internet",
-                    "en direct sur le web",
-                )
+        low_a = answer.lower()
+        lie = any(
+            x in low_a
+            for x in (
+                "je ne peux pas",
+                "pas effectuer",
+                "n'ai pas accès",
+                "ne dispose pas",
+                "registres d'entreprises",
+                "contacter directement",
+                "sites fiables comme",
+                "infogreffe",
+                "trustpilot",
+                "en direct sur le web",
             )
         )
         if lie:
