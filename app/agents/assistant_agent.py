@@ -197,8 +197,9 @@ RÈGLES :
    (nombre, âge apparent, attitude). Ensuite UNE phrase :
    pas de prénom sauf si l'utilisateur l'a dit.
    INTERDIT de répondre seulement « je ne peux pas identifier ».
-   Structure documents texte : type, résumé, points importants.
-   Pas de rubrique « zones illisibles » si tout est lisible.
+   PDF : uniquement le texte/pages fournis. INTERDIT d'inventer
+   les « avantages d'un devis en général ».
+   Si lecture impossible : le dire en 1 phrase, proposer une photo de page.
 7. DROIT / FISCALITÉ / TRAVAIL / OBLIGATIONS LÉGALES :
    - Réponse générale et prudente uniquement. Jamais « la loi impose X » comme un verdict.
    - Terminez TOUJOURS par exactement :
@@ -597,6 +598,18 @@ def _image_parts_from_payload(payload: dict) -> list:
         mime = (att.get("mime") or att.get("type") or "").lower()
         b64 = att.get("content_b64") or att.get("content") or ""
         if not b64:
+            continue
+        if "pdf" in mime or name.endswith(".pdf"):
+            try:
+                raw = _decode_b64(b64)
+                pages, _ = pdf_pages_as_jpeg_b64(raw, 2)
+                for jb64 in pages:
+                    parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{jb64}"},
+                    })
+            except Exception as e:
+                print(f"[Assistant] pdf-vision: {e}")
             continue
         if not (mime.startswith("image/") or name.endswith((".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"))):
             continue
