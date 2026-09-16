@@ -35,9 +35,14 @@ AVAILABLE = [
         "desc": "Noter une tâche à faire, sans notification (liste Planning).",
     },
     {
-        "key": "documents",
-        "label": "Documents",
-        "desc": "Joindre une photo ou un PDF (trombone à côté du champ). Clarity lit le fichier, répond à votre question, ou l'envoie par mail.",
+        "key": "analyser",
+        "label": "Analyser",
+        "desc": "Joindre une photo ou un PDF (trombone ou bouton Analyser). Clarity lit le fichier, répond, ou l'envoie par mail.",
+    },
+    {
+        "key": "compte_rendu",
+        "label": "Compte rendu",
+        "desc": "Dicter les points d'une visite ou d'une réunion, Clarity rédige le compte rendu.",
     },
 ]
 
@@ -45,37 +50,17 @@ COMING_SOON = [
     {
         "key": "devis",
         "label": "Devis",
-        "desc": "Préparer un chiffrage rapide à partir d'une simple demande orale.",
+        "desc": "Préparer un chiffrage à partir d'une demande orale.",
     },
     {
         "key": "factures",
         "label": "Facturation",
-        "desc": "Créer, suivre et envoyer vos factures directement depuis Clarity.",
-    },
-    {
-        "key": "coffre",
-        "label": "Coffre documents",
-        "desc": "Retrouver plus tard un fichier déjà envoyé, sans le rechercher à la main.",
-    },
-    {
-        "key": "crm",
-        "label": "Contacts avancés",
-        "desc": "Centraliser toutes les informations de vos clients au même endroit.",
-    },
-    {
-        "key": "taches_avancees",
-        "label": "Tâches avancées",
-        "desc": "Échéances, priorités et vue d'ensemble au-delà de la liste simple.",
-    },
-    {
-        "key": "recherche",
-        "label": "Recherche et résumés",
-        "desc": "Retrouver rapidement une information ou obtenir une synthèse.",
+        "desc": "Créer et envoyer vos factures depuis Clarity.",
     },
     {
         "key": "chantier",
         "label": "Compagnon de chantier",
-        "desc": "Avant une intervention, Clarity vous rappelle le matériel, les documents et les points importants.",
+        "desc": "Avant une intervention : matériel et points à ne pas oublier.",
     },
 ]
 
