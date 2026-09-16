@@ -153,12 +153,12 @@ def process_admin_alerts(sb: Client, now: datetime, debug: list) -> dict:
         sub_new = (
             sb.table("subscriptions")
             .select("*")
-            .gte("created_at", since)
             .limit(80)
             .execute()
             .data
             or []
         )
+        debug.append(f"admin_subs={len(sub_new)}")
     except Exception as e:
         debug.append(f"admin subs signup: {e}")
         try:
@@ -171,6 +171,8 @@ def process_admin_alerts(sb: Client, now: datetime, debug: list) -> dict:
         if not uid:
             continue
         email = s.get("email") or s.get("user_email") or ""
+        if not email and "@" in uid:
+            email = uid
         prenom = (
             s.get("first_name")
             or s.get("prenom")
