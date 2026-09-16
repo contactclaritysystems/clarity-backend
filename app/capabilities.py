@@ -48,6 +48,21 @@ AVAILABLE = [
 
 COMING_SOON = [
     {
+        "key": "sms",
+        "label": "SMS",
+        "desc": "Rédiger un SMS comme un mail. L'aperçu s'ouvre dans l'app Messages, vous validez l'envoi.",
+    },
+    {
+        "key": "gps",
+        "label": "Itinéraire",
+        "desc": "« Ouvre le GPS pour aller chez Anthony » : Maps, Waze ou Plans, à partir de l'adresse du contact.",
+    },
+    {
+        "key": "en_route",
+        "label": "Prévenir en route",
+        "desc": "Prévenir le client par SMS : j'arrive dans X minutes.",
+    },
+    {
         "key": "devis",
         "label": "Devis",
         "desc": "Préparer un chiffrage à partir d'une demande orale.",
@@ -56,6 +71,16 @@ COMING_SOON = [
         "key": "factures",
         "label": "Facturation",
         "desc": "Créer et envoyer vos factures depuis Clarity.",
+    },
+    {
+        "key": "calendar",
+        "label": "Agenda Google",
+        "desc": "Voir dans Clarity les rendez-vous déjà dans votre agenda.",
+    },
+    {
+        "key": "whatsapp",
+        "label": "WhatsApp",
+        "desc": "Même principe que le SMS, dans WhatsApp.",
     },
     {
         "key": "chantier",
