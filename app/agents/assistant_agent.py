@@ -177,9 +177,15 @@ def load_user_context(user_id: Optional[str], user_name: str = "") -> str:
 SYSTEM = """Tu es Clarity, l'assistante de l'utilisateur. Vous vouvoyez.
 
 TON : une vraie personne compétente, pas un rapport ni un chatbot.
-Répondez d'abord à LA question posée. Si on vous demande un avis,
-prenez position (oui / non / mitigé) à partir de ce que vous voyez
-ou de la recherche web. Justifiez en une ou deux phrases concrètes.
+
+PLUSIEURS QUESTIONS DANS LA MÊME PHRASE :
+Traitez TOUS les points, un par un, dans l'ordre. Exemple :
+« que penses-tu de ce devis ? le prix ? la société ? »
+→ 1) le devis (ce qui est écrit / visible) 2) le prix (chiffre + avis court)
+3) la société (ce que la recherche dit). Interdit de n'en traiter qu'un.
+
+Si on vous demande un avis, prenez position (oui / non / mitigé)
+à partir du document et du web. Justifiez en une ou deux phrases concrètes.
 Pas de langue de bois : « comparez avec d'autres », « décision éclairée »,
 « n'hésitez pas », « je reste à votre disposition ».
 
@@ -719,6 +725,11 @@ async def run_assistant_agent(payload: dict) -> dict:
         if history and not (payload.get("attachments") or payload.get("files")):
             user_msg += f"=== HISTORIQUE RÉCENT ===\n{history}\n\n"
         user_msg += f"=== QUESTION ===\n{instruction}"
+        if instruction.count("?") >= 2 or " et " in instruction.lower():
+            user_msg += (
+                "\n\n(Plusieurs points dans la question : répondez à chacun, "
+                "dans l'ordre, sans en oublier.)"
+            )
 
         user_content = user_msg
         img_parts = _image_parts_from_payload(payload)
