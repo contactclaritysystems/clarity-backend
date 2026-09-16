@@ -588,6 +588,33 @@ def load_documents_block(payload: dict) -> str:
     return (nouveau or prev)[:12000]
 
 
+def _image_parts_from_payload(payload: dict) -> list:
+    parts = []
+    for att in (payload.get("attachments") or payload.get("files") or [])[:4]:
+        if not isinstance(att, dict):
+            continue
+        name = (att.get("filename") or att.get("name") or "").lower()
+        mime = (att.get("mime") or att.get("type") or "").lower()
+        b64 = att.get("content_b64") or att.get("content") or ""
+        if not b64:
+            continue
+        if not (mime.startswith("image/") or name.endswith((".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"))):
+            continue
+        if "heic" in mime or "heif" in mime or name.endswith((".heic", ".heif")):
+            try:
+                conv = heic_to_jpeg_b64(_decode_b64(b64))
+                if conv:
+                    b64, mime = conv, "image/jpeg"
+            except Exception:
+                pass
+        if str(b64).startswith("data:"):
+            url = b64
+        else:
+            url = f"data:{mime or 'image/jpeg'};base64,{b64}"
+        parts.append({"type": "image_url", "image_url": {"url": url}})
+    return parts
+
+
 async def run_assistant_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
@@ -641,15 +668,20 @@ async def run_assistant_agent(payload: dict) -> dict:
             )
         if web_block:
             user_msg += web_block
-        if history:
+        if history and not (payload.get("attachments") or payload.get("files")):
             user_msg += f"=== HISTORIQUE RÉCENT ===\n{history}\n\n"
         user_msg += f"=== QUESTION ===\n{instruction}"
 
+        user_content = user_msg
+        img_parts = _image_parts_from_payload(payload)
+        if img_parts:
+            user_content = [{"type": "text", "text": user_msg}] + img_parts
+
         response = get_client().chat.completions.create(
-            model=MODEL,
+            model=os.getenv("VISION_MODEL", "gpt-4o"),
             messages=[
                 {"role": "system", "content": SYSTEM},
-                {"role": "user", "content": user_msg},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.3,
             max_tokens=900,
