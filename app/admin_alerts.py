@@ -80,10 +80,15 @@ def notify_signup(user_id: str, email: str = "", prenom: str = "") -> dict:
     sb = get_supabase()
     if not sb:
         return {"ok": False, "reason": "no_sb"}
-    if not claim(sb, user_id, "signup"):
+    email = (email or "").strip()
+    if not email and "@" in (user_id or ""):
+        email = (user_id or "").strip()
+    if "@" not in email:
+        return {"ok": False, "reason": "no_email"}
+    if not prenom or prenom in ("—", user_id):
+        prenom = email.split("@")[0]
+    if not claim(sb, email, "signup"):
         return {"ok": True, "skipped": True}
-    prenom = prenom or "—"
-    email = email or "—"
     text = (
         "🎉 Nouvelle inscription Clarity !\n"
         f"Prénom : {prenom}\n"
