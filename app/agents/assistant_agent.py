@@ -480,8 +480,30 @@ def pdf_pages_as_jpeg_b64(data: bytes, max_pages: int = 3):
     return [], " | ".join(errors)
 
 
+def heic_to_jpeg_b64(raw: bytes) -> str:
+    try:
+        import io
+        import base64
+        from pillow_heif import register_heif_opener
+        from PIL import Image
+        register_heif_opener()
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        print(f"[Assistant] heic: {e}")
+        return ""
+
+
 def describe_image_b64(b64: str, mime: str, question: str) -> str:
     try:
+        low = (mime or "").lower()
+        if "heic" in low or "heif" in low:
+            raw = _decode_b64(b64)
+            conv = heic_to_jpeg_b64(raw)
+            if conv:
+                b64, mime = conv, "image/jpeg"
         url = b64 if str(b64).startswith("data:") else f"data:{mime or 'image/jpeg'};base64,{b64}"
         r = get_client().chat.completions.create(
             model=os.getenv("VISION_MODEL", "gpt-4o"),
