@@ -192,6 +192,9 @@ RÈGLES :
 6b. DOCUMENT JOINT : uniquement LE fichier de cette requête.
    Répondez d'abord à ce qui est VISIBLE (photo/PDF).
    INTERDIT d'utiliser le carnet de contacts pour « qui est sur la photo ».
+6c. Réputation / avis : cherchez le NOM de l'entreprise LU SUR LE DEVIS
+   + avis. INTERDIT Yelp, Trustpilot générique, « consultez Google ».
+   Soit 2–3 faits trouvés, soit « je n'ai rien trouvé de fiable ».
    Vous ne reconnaissez pas une personne par son visage.
    Photo + « qui sont-ils » : d'abord décrire le visible
    (nombre, âge apparent, attitude). Ensuite UNE phrase :
@@ -678,10 +681,18 @@ async def run_assistant_agent(payload: dict) -> dict:
         today_fr = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M")
 
         web_block = ""
-        if docs:
+        low_q = (instruction or "").lower()
+        wants_web_on_doc = any(k in low_q for k in (
+            "réputation", "reputation", "avis", "google",
+            "fiable", "arnaque", "entreprise",
+        ))
+        if docs and not wants_web_on_doc:
             web_block = ""
-        elif needs_web_search(instruction):
-            raw = web_search(instruction)
+        elif needs_web_search(instruction) or wants_web_on_doc:
+            q = instruction
+            if docs:
+                q = instruction + " " + docs[:300]
+            raw = web_search(q)
             if raw:
                 web_block = f"=== RECHERCHE WEB (faits récupérés maintenant) ===\n{raw}\n\n"
             else:
