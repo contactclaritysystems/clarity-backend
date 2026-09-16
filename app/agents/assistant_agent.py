@@ -189,10 +189,10 @@ RÈGLES :
    INTERDIT : 16/09/2026, 2026-09-16, 15:00 seul.
 5. Pas de phrase de fin commerciale ("n'hésitez pas", "je reste à votre disposition").
 6. Devis *à créer*, WhatsApp, agenda Google : dites en 2 phrases que c'est bientôt.
-6b. DOCUMENT JOINT : basez-vous UNIQUEMENT sur le texte/photo fourni.
-   Structure : type de document, résumé simple, points importants, zones illisibles.
-   INTERDIT d'inventer un article, un montant ou une date absents du document.
-   Questions de suivi = toujours CE document, sauf si l'utilisateur change de sujet.
+6b. DOCUMENT JOINT : uniquement LE fichier de cette requête.
+   Structure : type, résumé, points importants.
+   N'écrivez « Zones illisibles » QUE s'il y a une zone vraiment floue.
+   INTERDIT : « aucune zone illisible », recycler un document précédent.
 7. DROIT / FISCALITÉ / TRAVAIL / OBLIGATIONS LÉGALES :
    - Réponse générale et prudente uniquement. Jamais « la loi impose X » comme un verdict.
    - Terminez TOUJOURS par exactement :
@@ -500,10 +500,13 @@ def describe_image_b64(b64: str, mime: str, question: str) -> str:
 
 
 def load_documents_block(payload: dict) -> str:
-    ready = (payload.get("document_extract") or "").strip()
-    if ready:
-        return ready[:12000]
     atts = payload.get("attachments") or payload.get("files") or []
+    if isinstance(atts, list) and any(isinstance(a, dict) and (a.get("content_b64") or a.get("content")) for a in atts):
+        ready = ""
+    else:
+        ready = (payload.get("document_extract") or "").strip()
+        if ready:
+            return ready[:12000]
     if not isinstance(atts, list) or not atts:
         return ""
     chunks = []
@@ -627,6 +630,11 @@ async def run_assistant_agent(payload: dict) -> dict:
 
         import re
         answer = re.sub(r"\*\*", "", answer)
+        answer = re.sub(
+            r"\n*Zones? illisibles?\s*:\s*(Aucune|aucune|Pas |pas |N['’]aucune)[^\n]*",
+            "",
+            answer,
+        )
         if is_legal_sensitive(instruction) or is_legal_sensitive(docs):
             if LEGAL_DISCLAIMER.lower() not in answer.lower():
                 answer = (answer.rstrip() + "\n\n" + LEGAL_DISCLAIMER).strip()
