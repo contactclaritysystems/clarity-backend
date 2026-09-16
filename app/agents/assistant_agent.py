@@ -431,30 +431,54 @@ def extract_pdf_bytes(data: bytes) -> str:
         return ""
 
 
-def pdf_pages_as_jpeg_b64(data: bytes, max_pages: int = 3) -> list:
-    """PDF scanné : rend les 1ères pages en JPEG pour la vision."""
-    out = []
+def pdf_pages_as_jpeg_b64(data: bytes, max_pages: int = 3):
+    """PDF scanné : rend les 1ères pages en JPEG. Retourne (liste, erreur)."""
+    errors = []
     try:
         import io
         import base64
         import fitz
         doc = fitz.open(stream=data, filetype="pdf")
+        out = []
         for i in range(min(max_pages, doc.page_count)):
             page = doc.load_page(i)
-            pix = page.get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)
-            bio = io.BytesIO(pix.tobytes("jpeg"))
-            out.append(base64.b64encode(bio.getvalue()).decode("ascii"))
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.4, 1.4), alpha=False)
+            out.append(base64.b64encode(pix.tobytes("jpeg")).decode("ascii"))
         doc.close()
+        if out:
+            return out, ""
+        errors.append("fitz: 0 page")
     except Exception as e:
-        print(f"[Assistant] pdf-render: {e}")
-    return out
+        errors.append(f"fitz: {e}")
+        print(f"[Assistant] pdf-render fitz: {e}")
+    try:
+        import io
+        import base64
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(data)
+        out = []
+        n = min(max_pages, len(doc))
+        for i in range(n):
+            page = doc[i]
+            bitmap = page.render(scale=1.4)
+            pil = bitmap.to_pil()
+            buf = io.BytesIO()
+            pil.convert("RGB").save(buf, format="JPEG", quality=75)
+            out.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+        if out:
+            return out, ""
+        errors.append("pdfium: 0 page")
+    except Exception as e:
+        errors.append(f"pdfium: {e}")
+        print(f"[Assistant] pdf-render pdfium: {e}")
+    return [], " | ".join(errors)
 
 
 def describe_image_b64(b64: str, mime: str, question: str) -> str:
     try:
         url = b64 if str(b64).startswith("data:") else f"data:{mime or 'image/jpeg'};base64,{b64}"
         r = get_client().chat.completions.create(
-            model=MODEL,
+            model=os.getenv("VISION_MODEL", "gpt-4o"),
             messages=[{
                 "role": "user",
                 "content": [
@@ -501,12 +525,13 @@ def load_documents_block(payload: dict) -> str:
             if len(txt) >= 80:
                 chunks.append(f"=== PDF {name} ===\n{txt}")
             else:
-                pages = pdf_pages_as_jpeg_b64(raw, 3)
+                pages, perr = pdf_pages_as_jpeg_b64(raw, 3)
                 if not pages:
                     chunks.append(
                         f"=== PDF {name} ===\n"
-                        "(PDF image, lecture impossible pour l'instant. "
-                        "Prenez une photo nette d'une page.)"
+                        "Lecture image du PDF impossible. "
+                        f"Détail technique : {perr or 'inconnu'}. "
+                        "Joindre une photo JPG d'une page fonctionne toujours."
                     )
                 else:
                     bits = []
