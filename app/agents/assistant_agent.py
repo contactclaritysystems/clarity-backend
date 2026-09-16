@@ -190,9 +190,13 @@ RÈGLES :
 5. Pas de phrase de fin commerciale ("n'hésitez pas", "je reste à votre disposition").
 6. Devis *à créer*, WhatsApp, agenda Google : dites en 2 phrases que c'est bientôt.
 6b. DOCUMENT JOINT : uniquement LE fichier de cette requête.
-   Structure : type, résumé, points importants.
-   N'écrivez « Zones illisibles » QUE s'il y a une zone vraiment floue.
-   INTERDIT : « aucune zone illisible », recycler un document précédent.
+   Répondez d'abord à ce qui est VISIBLE (photo/PDF).
+   INTERDIT d'utiliser le carnet de contacts pour « qui est sur la photo ».
+   Vous ne reconnaissez pas une personne par son visage.
+   Si on demande « qui sont-ils » : décrire (âge apparent, nombre)
+   et dire que vous ne pouvez pas mettre de nom sans que l'utilisateur le dise.
+   Structure documents texte : type, résumé, points importants.
+   Pas de rubrique « zones illisibles » si tout est lisible.
 7. DROIT / FISCALITÉ / TRAVAIL / OBLIGATIONS LÉGALES :
    - Réponse générale et prudente uniquement. Jamais « la loi impose X » comme un verdict.
    - Terminez TOUJOURS par exactement :
@@ -577,10 +581,13 @@ async def run_assistant_agent(payload: dict) -> dict:
         }
 
     try:
-        context = load_user_context(user_id, user_name)
-        mem = memory_as_text(load_memory(user_id))
-        if mem:
-            context = context + "\n\n" + mem
+        if docs:
+            context = f"Utilisateur : {user_name or 'client'}."
+        else:
+            context = load_user_context(user_id, user_name)
+            mem = memory_as_text(load_memory(user_id))
+            if mem:
+                context = context + "\n\n" + mem
         today_fr = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M")
 
         web_block = ""
