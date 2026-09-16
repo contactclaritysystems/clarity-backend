@@ -126,7 +126,7 @@ def _is_paid_row(row: dict) -> bool:
 
 def process_admin_alerts(sb: Client, now: datetime, debug: list) -> dict:
     out = {"signups": [], "paid": []}
-    since = (now - timedelta(hours=6)).isoformat()
+    since = (now - timedelta(days=7)).isoformat()
     # Inscriptions récentes
     try:
         rows = (
