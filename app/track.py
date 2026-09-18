@@ -1,14 +1,19 @@
-"""Comptage anonyme des ouvertures de la page d'accueil."""
+"""Comptage anonyme des ouvertures de la page d'accueil + Telegram admin."""
 import os
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Query
 from supabase import create_client, Client
 
+from app.admin_alerts import telegram_send
+
 load_dotenv()
 
 router = APIRouter()
+PARIS = ZoneInfo("Europe/Paris")
 
 
 def get_supabase() -> Optional[Client]:
@@ -33,6 +38,25 @@ async def track(payload: dict | None = None):
         sb.table("landing_events").insert({"event": event, "src": src}).execute()
     except Exception:
         return {"ok": False}
+
+    total = 0
+    try:
+        rows = sb.table("landing_events").select("event").execute()
+        total = sum(
+            1
+            for r in (rows.data or [])
+            if r.get("event") in ("home_landing", "flyer_landing")
+        )
+    except Exception:
+        pass
+
+    heure = datetime.now(PARIS).strftime("%H:%M")
+    telegram_send(
+        f"👀 Ouverture Clarity\n"
+        f"Page : accueil\n"
+        f"Heure : {heure}\n"
+        f"Total ouvertures : {total}"
+    )
     return {"ok": True}
 
 
