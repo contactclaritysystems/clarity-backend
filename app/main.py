@@ -26,6 +26,7 @@ from app.notifications import run_notification_pass, send_email, get_digest_sett
 from app.tasks import list_tasks, create_task, update_task, delete_task
 from app.contact_activity import get_activity, patch_contact, log_sent_mail
 from app.mail_send import send_user_mail
+from app.track import router as track_router
 
 _NOTIFY_TEST_LAST = {}
 
@@ -42,6 +43,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(track_router)
 
 
 class OrchestratorPayload(BaseModel):
