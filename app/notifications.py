@@ -283,7 +283,7 @@ def get_profile(sb: Client, user_id: str) -> Optional[dict]:
     return None
 
 
-def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str], user_email: Optional[str] = None, reminder_offset: Optional[str] = None, appointment_offset: Optional[str] = None, vocab_enabled: Optional[bool] = None) -> dict:
+def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str], user_email: Optional[str] = None, reminder_offset: Optional[str] = None, appointment_offset: Optional[str] = None, vocab_enabled: Optional[bool] = None, vocab_time: Optional[str] = None) -> dict:
     sb = get_supabase()
     if not sb or not user_id:
         return {"success": False, "message": "Paramètres incomplets."}
@@ -299,6 +299,13 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
         except Exception:
             return {"success": False, "message": "Heure invalide (HH:MM)."}
         patch["digest_time"] = time_s
+    if vocab_time:
+        vocab_time = str(vocab_time).strip()[:5]
+        try:
+            datetime.strptime(vocab_time, "%H:%M")
+        except Exception:
+            return {"success": False, "message": "Heure des mots invalide (HH:MM)."}
+        patch["vocab_time"] = vocab_time
     def _norm_offset(val: str) -> Optional[str]:
         v = str(val or "").strip().lower()
         if v in ("off", "none", "false"):
@@ -369,6 +376,7 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
             "reminder_offset": str(row.get("reminder_offset") or "0"),
             "appointment_offset": str(row.get("appointment_offset") or "60"),
             "vocab_enabled": bool(row.get("vocab_enabled") or False),
+            "vocab_time": str(row.get("vocab_time") or "19:00")[:5],
         }
         return {"success": True, "settings": s, **s}
     return {
@@ -401,6 +409,7 @@ def get_digest_settings(user_id: str) -> dict:
         "reminder_offset": rem,
         "appointment_offset": appt,
         "vocab_enabled": bool(prof.get("vocab_enabled")) if prof else False,
+        "vocab_time": str(prof.get("vocab_time") or "19:00")[:5] if prof else "19:00",
     }
 
 
@@ -451,7 +460,7 @@ def day_items(sb: Client, user_id: str, day: str) -> tuple:
     return rappels, rdvs
 
 
-def format_digest(day_fr: str, rappels: list, rdvs: list, vocab_block: str = "") -> tuple:
+def format_digest(day_fr: str, rappels: list, rdvs: list) -> tuple:
     subject = f"Votre journée Clarity — {day_fr}"
     lines = [f"Voici ce qui est prévu aujourd'hui ({day_fr}).", ""]
     if rdvs:
@@ -469,11 +478,15 @@ def format_digest(day_fr: str, rappels: list, rdvs: list, vocab_block: str = "")
     if not rdvs and not rappels:
         lines.append("Rien de noté pour aujourd'hui.")
         lines.append("")
-    if vocab_block:
-        lines.append(vocab_block.rstrip())
-        lines.append("")
     lines.append("— Clarity")
     return subject, "\n".join(lines)
+
+
+def _in_send_window(now: datetime, today: str, time_s: str) -> bool:
+    target = parse_dt(today, time_s)
+    if not target:
+        return False
+    return not (now < target or now - target > timedelta(minutes=12))
 
 
 def process_digests(sb: Client, now: datetime, cache: dict, debug: list) -> List[str]:
@@ -488,40 +501,25 @@ def process_digests(sb: Client, now: datetime, cache: dict, debug: list) -> List
         uid = str(prof.get("id") or "")
         if not uid:
             continue
-        vocab_on = bool(prof.get("vocab_enabled"))
-        digest_on = prof.get("digest_enabled") is not False
-        if not digest_on and not vocab_on:
+        if prof.get("digest_enabled") is False:
             continue
         time_s = str(prof.get("digest_time") or "07:30")[:5]
-        target = parse_dt(today, time_s)
-        if not target:
+        if not _in_send_window(now, today, time_s):
             continue
         last = str(prof.get("digest_last_sent") or "")[:10]
         if last == today:
-            continue
-        # fenêtre : de l'heure choisie jusqu'à +12 min (plusieurs ticks cron)
-        if now < target or now - target > timedelta(minutes=12):
             continue
         email = lookup_email(sb, uid, cache) or prof.get("email") or prof.get("user_email")
         if not email:
             debug.append(f"digest no-email {uid}")
             continue
-        rappels, rdvs = day_items(sb, uid, today) if digest_on else ([], [])
-        vocab_block = ""
-        if vocab_on:
-            try:
-                from app.vocab import build_daily_pack, format_vocab_block
-                vocab_block = format_vocab_block(build_daily_pack(uid))
-            except Exception as e:
-                print(f"[Notify] vocab {uid}: {e}")
-                debug.append(f"vocab fail {uid}: {e}")
-        if digest_on and not rappels and not rdvs and not vocab_block:
+        rappels, rdvs = day_items(sb, uid, today)
+        if not rappels and not rdvs:
             debug.append(f"digest skip empty {uid}")
             continue
-        if not digest_on and not vocab_block:
-            continue
         day_fr = now.strftime("%d/%m/%Y")
-        subject, body = format_digest(day_fr, rappels, rdvs, vocab_block)
+        subject, body = format_digest(day_fr, rappels, rdvs)
+        result = send_email(email, subject, body)
         if result == "ok":
             try:
                 sb.table("profiles").update({"digest_last_sent": today}).eq("id", uid).execute()
@@ -530,6 +528,51 @@ def process_digests(sb: Client, now: datetime, cache: dict, debug: list) -> List
             sent.append(email)
         else:
             debug.append(f"digest send-fail {email}: {result}")
+    return sent
+
+
+def process_vocab(sb: Client, now: datetime, cache: dict, debug: list) -> List[str]:
+    sent = []
+    today = now.strftime("%Y-%m-%d")
+    try:
+        profiles = sb.table("profiles").select("*").limit(500).execute().data or []
+    except Exception as e:
+        debug.append(f"vocab profiles: {e}")
+        return sent
+    for prof in profiles:
+        uid = str(prof.get("id") or "")
+        if not uid or not prof.get("vocab_enabled"):
+            continue
+        time_s = str(prof.get("vocab_time") or "19:00")[:5]
+        if not _in_send_window(now, today, time_s):
+            continue
+        last = str(prof.get("vocab_last_sent") or "")[:10]
+        if last == today:
+            continue
+        email = lookup_email(sb, uid, cache) or prof.get("email") or prof.get("user_email")
+        if not email:
+            debug.append(f"vocab no-email {uid}")
+            continue
+        try:
+            from app.vocab import build_daily_pack, format_vocab_block
+            block = format_vocab_block(build_daily_pack(uid))
+        except Exception as e:
+            debug.append(f"vocab fail {uid}: {e}")
+            continue
+        if not block.strip():
+            continue
+        day_fr = now.strftime("%d/%m/%Y")
+        subject = f"7 mots pour aujourd'hui — {day_fr}"
+        body = block + "\n— Clarity"
+        result = send_email(email, subject, body)
+        if result == "ok":
+            try:
+                sb.table("profiles").update({"vocab_last_sent": today}).eq("id", uid).execute()
+            except Exception as e:
+                print(f"[Notify] vocab_last_sent: {e}")
+            sent.append(email)
+        else:
+            debug.append(f"vocab send-fail {email}: {result}")
     return sent
 
 
@@ -543,6 +586,7 @@ def run_notification_pass() -> dict:
     rappels = process_reminders(sb, now, cache, debug)
     rdvs = process_appointments(sb, now, cache, debug)
     digests = process_digests(sb, now, cache, debug)
+    vocabs = process_vocab(sb, now, cache, debug)
     admin = {}
     try:
         from app.admin_alerts import process_admin_alerts
@@ -550,11 +594,12 @@ def run_notification_pass() -> dict:
     except Exception as e:
         debug.append(f"admin: {e}")
         print(f"[Notify] admin: {e}")
-    print(f"[Notify] pass {now.isoformat()} rappels={rappels} rdvs={rdvs} debug={debug}")
+    print(f"[Notify] pass {now.isoformat()} rappels={rappels} rdvs={rdvs} vocabs={vocabs} debug={debug}")
     return {
         "ok": True,
         "now": now.isoformat(),
         "reminders_sent": rappels,
+        "vocab_sent": vocabs,
         "appointments_sent": rdvs,
         "digests_sent": digests,
         "admin_alerts": admin,

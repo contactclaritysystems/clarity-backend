@@ -154,6 +154,7 @@ class DigestSettingsPayload(BaseModel):
     reminder_offset: Optional[str] = None
     appointment_offset: Optional[str] = None
     vocab_enabled: Optional[bool] = None
+    vocab_time: Optional[str] = None
 
 
 @app.get("/vocab")
@@ -175,7 +176,7 @@ async def notify_settings_get(user_id: str = ""):
 async def notify_settings_post(payload: DigestSettingsPayload):
     if not payload.user_id:
         return {"success": False, "message": "user_id manquant"}
-    return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time, payload.user_email, payload.reminder_offset, payload.appointment_offset, payload.vocab_enabled)
+    return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time, payload.user_email, payload.reminder_offset, payload.appointment_offset, payload.vocab_enabled, payload.vocab_time)
 
 
 @app.get("/cron/notifications")
