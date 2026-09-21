@@ -101,7 +101,7 @@ def lookup_email(sb: Client, user_id: str, cache: dict) -> Optional[str]:
     return email
 
 
-def send_email(to_email: str, subject: str, body: str) -> str:
+def send_email(to_email: str, subject: str, body: str, html: bool = False) -> str:
     """Retourne 'ok' ou le message d'erreur."""
     host = os.getenv("NOTIFY_SMTP_HOST") or os.getenv("SMTP_HOST")
     user = os.getenv("NOTIFY_SMTP_USER") or os.getenv("SMTP_USER")
@@ -132,7 +132,7 @@ def send_email(to_email: str, subject: str, body: str) -> str:
         print(f"[Notify] {msg}")
         return msg
     try:
-        mime = MIMEText(body, "plain", "utf-8")
+        mime = MIMEText(body, "html" if html else "plain", "utf-8")
         mime["Subject"] = subject
         mime["From"] = f"Clarity <{from_addr}>"
         mime["To"] = to_email
@@ -555,16 +555,18 @@ def process_vocab(sb: Client, now: datetime, cache: dict, debug: list) -> List[s
             continue
         try:
             from app.vocab import build_daily_pack, format_vocab_block
-            block = format_vocab_block(build_daily_pack(uid))
+            pack = build_daily_pack(uid)
+            block = format_vocab_block(pack, html=True)
         except Exception as e:
             debug.append(f"vocab fail {uid}: {e}")
             continue
         if not block.strip():
             continue
         day_fr = now.strftime("%d/%m/%Y")
-        subject = f"7 mots pour aujourd'hui — {day_fr}"
-        body = block + "\n— Clarity"
-        result = send_email(email, subject, body)
+        n = len(pack)
+        subject = f"{n} mot{'s' if n > 1 else ''} pour aujourd'hui — {day_fr}"
+        body = block + "<p>— Clarity</p>"
+        result = send_email(email, subject, body, html=True)
         if result == "ok":
             try:
                 sb.table("profiles").update({"vocab_last_sent": today}).eq("id", uid).execute()

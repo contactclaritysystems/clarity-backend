@@ -77,11 +77,28 @@ def pick_reviews(existing: List[dict], today: date) -> List[dict]:
     return [x[2] for x in scored[:2]]
 
 
-def generate_new_words(exclude: List[str]) -> List[dict]:
-    banned = ", ".join(exclude[:80]) if exclude else "(aucun)"
-    prompt = f"""Donne EXACTEMENT 5 mots français utiles à l'oral (conversation réelle).
-Varie verbes, noms, adjectifs. Registre courant ou soutenu encore vivant.
-Interdits (déjà envoyés) : {banned}
+BANAL = {
+    "soutenir", "évoluer", "évolution", "découverte", "découvrir", "pertinent",
+    "bienveillance", "important", "importance", "simple", "nouveau", "nouvelle",
+    "changer", "aider", "améliorer", "développement", "développer", "projet",
+    "équipe", "travailler", "positif", "négatif", "chose", "idée", "besoin",
+    "mettre", "faire", "dire", "parler", "penser", "savoir", "pouvoir",
+}
+
+NEEDED = 7
+
+
+def generate_new_words(exclude: List[str], count: int = 5) -> List[dict]:
+    banned = ", ".join(list(dict.fromkeys((exclude or []) + list(BANAL)))[:120])
+    prompt = f"""Donne EXACTEMENT {count} mots français.
+Niveau : adulte soigné qui parle bien, SANS être un dictionnaire rare.
+À éviter absolument :
+- mots trop banals (évoluer, soutenir, découverte, pertinent, bienveillance, important, améliorer…)
+- mots trop savants ou vieillis (pérorer, amphigouri, lucubration…)
+Le juste milieu : un mot qu'on est content de caser dans une vraie phrase
+(ex. nuancer, cadrer, franc, tangible, relayer, trancher, serein, concret, diligent — ce sont des EXEMPLES, n'envoie pas toujours les mêmes).
+Varie verbes, noms, adjectifs.
+Interdits en plus : {banned}
 
 JSON uniquement :
 {{
@@ -90,14 +107,13 @@ JSON uniquement :
       "word": "",
       "definition": "une phrase simple",
       "synonyms": ["", "", ""],
-      "example": "une phrase que je pourrais dire",
-      "register": "courant|soutenu|familier",
+      "example": "une phrase orale naturelle à la 1re personne si possible",
+      "register": "courant",
       "usefulness": 4
     }}
   ]
 }}
-usefulness = 1 à 5, 5 = très utile à l'oral aujourd'hui.
-Pas de termes vieillis ou pédants."""
+usefulness 1–5 = utile à l'oral aujourd'hui."""
     resp = get_client().chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -131,7 +147,9 @@ Pas de termes vieillis ou pédants."""
                 "usefulness": use,
             }
         )
-        if len(out) >= 5:
+        if word.lower() in BANAL:
+            continue
+        if len(out) >= count:
             break
     return out
 
@@ -208,28 +226,45 @@ def build_daily_pack(user_id: str) -> List[dict]:
         return pack
     reviews = pick_reviews(existing, today)
     exclude = [str(w.get("word") or "") for w in existing]
+    need_new = NEEDED - len(reviews)
     try:
-        news = generate_new_words(exclude)
+        news = generate_new_words(exclude, count=need_new)
     except Exception as e:
         print(f"[Vocab] generate: {e}")
         news = []
     return persist_batch(user_id, news, reviews, today)
 
 
-def format_vocab_block(words: List[dict]) -> str:
+def format_vocab_block(words: List[dict], html: bool = False) -> str:
     if not words:
         return ""
-    lines = ["7 mots pour aujourd'hui", ""]
+    n = len(words)
+    title = f"{n} mot{'s' if n > 1 else ''} pour aujourd'hui"
+    if html:
+        parts = [f"<p><strong>{title}</strong></p>"]
+        for w in words:
+            name = str(w.get("word") or "")
+            review = w.get("kind") == "a_revoir"
+            head = f"<p><strong>{name}</strong>"
+            if review:
+                head += " <em>(à revoir)</em>"
+            head += "</p>"
+            parts.append(head)
+            if w.get("definition"):
+                parts.append(f"<p>{w['definition']}</p>")
+            if w.get("synonyms"):
+                parts.append(f"<p>Synonymes : {w['synonyms']}</p>")
+            if w.get("example"):
+                parts.append(f"<p>Ex. {w['example']}</p>")
+        return "\n".join(parts)
+    lines = [title, ""]
     for w in words:
-        tag = "À revoir" if w.get("kind") == "a_revoir" else "Nouveau"
-        syn = w.get("synonyms") or ""
-        reg = w.get("register") or ""
-        extra = f" ({reg})" if reg else ""
-        lines.append(f"• {w.get('word')}{extra} — {tag}")
+        tag = " (à revoir)" if w.get("kind") == "a_revoir" else ""
+        lines.append(f"• {w.get('word')}{tag}")
         if w.get("definition"):
             lines.append(f"  {w['definition']}")
-        if syn:
-            lines.append(f"  Synonymes : {syn}")
+        if w.get("synonyms"):
+            lines.append(f"  Synonymes : {w['synonyms']}")
         if w.get("example"):
             lines.append(f"  Ex. {w['example']}")
         lines.append("")
