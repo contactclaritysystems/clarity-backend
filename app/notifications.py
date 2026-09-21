@@ -283,13 +283,15 @@ def get_profile(sb: Client, user_id: str) -> Optional[dict]:
     return None
 
 
-def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str], user_email: Optional[str] = None, reminder_offset: Optional[str] = None, appointment_offset: Optional[str] = None) -> dict:
+def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional[str], user_email: Optional[str] = None, reminder_offset: Optional[str] = None, appointment_offset: Optional[str] = None, vocab_enabled: Optional[bool] = None) -> dict:
     sb = get_supabase()
     if not sb or not user_id:
         return {"success": False, "message": "Paramètres incomplets."}
     patch = {}
     if enabled is not None:
         patch["digest_enabled"] = bool(enabled)
+    if vocab_enabled is not None:
+        patch["vocab_enabled"] = bool(vocab_enabled)
     if time_s:
         time_s = str(time_s).strip()[:5]
         try:
@@ -366,6 +368,7 @@ def save_digest_settings(user_id: str, enabled: Optional[bool], time_s: Optional
             "digest_last_sent": None,
             "reminder_offset": str(row.get("reminder_offset") or "0"),
             "appointment_offset": str(row.get("appointment_offset") or "60"),
+            "vocab_enabled": bool(row.get("vocab_enabled") or False),
         }
         return {"success": True, "settings": s, **s}
     return {
@@ -397,6 +400,7 @@ def get_digest_settings(user_id: str) -> dict:
         "digest_last_sent": str(last)[:10] if last else None,
         "reminder_offset": rem,
         "appointment_offset": appt,
+        "vocab_enabled": bool(prof.get("vocab_enabled")) if prof else False,
     }
 
 
@@ -447,7 +451,7 @@ def day_items(sb: Client, user_id: str, day: str) -> tuple:
     return rappels, rdvs
 
 
-def format_digest(day_fr: str, rappels: list, rdvs: list) -> tuple:
+def format_digest(day_fr: str, rappels: list, rdvs: list, vocab_block: str = "") -> tuple:
     subject = f"Votre journée Clarity — {day_fr}"
     lines = [f"Voici ce qui est prévu aujourd'hui ({day_fr}).", ""]
     if rdvs:
@@ -465,6 +469,9 @@ def format_digest(day_fr: str, rappels: list, rdvs: list) -> tuple:
     if not rdvs and not rappels:
         lines.append("Rien de noté pour aujourd'hui.")
         lines.append("")
+    if vocab_block:
+        lines.append(vocab_block.rstrip())
+        lines.append("")
     lines.append("— Clarity")
     return subject, "\n".join(lines)
 
@@ -481,7 +488,9 @@ def process_digests(sb: Client, now: datetime, cache: dict, debug: list) -> List
         uid = str(prof.get("id") or "")
         if not uid:
             continue
-        if prof.get("digest_enabled") is False:
+        vocab_on = bool(prof.get("vocab_enabled"))
+        digest_on = prof.get("digest_enabled") is not False
+        if not digest_on and not vocab_on:
             continue
         time_s = str(prof.get("digest_time") or "07:30")[:5]
         target = parse_dt(today, time_s)
@@ -497,13 +506,22 @@ def process_digests(sb: Client, now: datetime, cache: dict, debug: list) -> List
         if not email:
             debug.append(f"digest no-email {uid}")
             continue
-        rappels, rdvs = day_items(sb, uid, today)
-        if not rappels and not rdvs:
+        rappels, rdvs = day_items(sb, uid, today) if digest_on else ([], [])
+        vocab_block = ""
+        if vocab_on:
+            try:
+                from app.vocab import build_daily_pack, format_vocab_block
+                vocab_block = format_vocab_block(build_daily_pack(uid))
+            except Exception as e:
+                print(f"[Notify] vocab {uid}: {e}")
+                debug.append(f"vocab fail {uid}: {e}")
+        if digest_on and not rappels and not rdvs and not vocab_block:
             debug.append(f"digest skip empty {uid}")
             continue
+        if not digest_on and not vocab_block:
+            continue
         day_fr = now.strftime("%d/%m/%Y")
-        subject, body = format_digest(day_fr, rappels, rdvs)
-        result = send_email(email, subject, body)
+        subject, body = format_digest(day_fr, rappels, rdvs, vocab_block)
         if result == "ok":
             try:
                 sb.table("profiles").update({"digest_last_sent": today}).eq("id", uid).execute()

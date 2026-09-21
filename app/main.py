@@ -23,6 +23,7 @@ from app.writing_styles import list_styles, create_style, delete_style
 from app.capabilities import public_payload
 from app.feature_requests import save_feature_request
 from app.notifications import run_notification_pass, send_email, get_digest_settings, save_digest_settings
+from app.vocab import history_payload
 from app.tasks import list_tasks, create_task, update_task, delete_task
 from app.contact_activity import get_activity, patch_contact, log_sent_mail
 from app.mail_send import send_user_mail
@@ -152,6 +153,14 @@ class DigestSettingsPayload(BaseModel):
     digest_time: Optional[str] = None
     reminder_offset: Optional[str] = None
     appointment_offset: Optional[str] = None
+    vocab_enabled: Optional[bool] = None
+
+
+@app.get("/vocab")
+async def vocab_history(user_id: str = ""):
+    if not user_id:
+        return {"success": False, "message": "user_id manquant", "words": []}
+    return history_payload(user_id)
 
 
 @app.get("/notify/settings")
@@ -166,7 +175,7 @@ async def notify_settings_get(user_id: str = ""):
 async def notify_settings_post(payload: DigestSettingsPayload):
     if not payload.user_id:
         return {"success": False, "message": "user_id manquant"}
-    return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time, payload.user_email, payload.reminder_offset, payload.appointment_offset)
+    return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time, payload.user_email, payload.reminder_offset, payload.appointment_offset, payload.vocab_enabled)
 
 
 @app.get("/cron/notifications")
