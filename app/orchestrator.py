@@ -66,6 +66,9 @@ RÈGLES DE ROUTAGE (dans l'ordre)
 4. Si c'est rédiger SANS destinataire email (post, Insta, LinkedIn, offre, CR, SMS à publier, « message pour Instagram ») → "redaction"
    « message pour Insta / LinkedIn / Facebook / Stories » = REDACTION, jamais mail.
    Mail seulement si un DESTINATAIRE PERSONNE (Antoine, mon patron) ou « envoie un mail ».
+   COMPTE RENDU : dès que la demande EST un compte rendu (« compte rendu », « compte-rendu », « CR de visite »)
+   → TOUJOURS "redaction". Même si le texte contient rendez-vous, planning, relance, vendredi :
+   ce sont des POINTS du CR, pas une demande de créer un RDV.
 5. Sinon → "assistant"
 
 ═══════════════════════════════════════
@@ -147,6 +150,10 @@ async def run_orchestrator(payload: dict) -> dict:
         if agent not in allowed:
             agent = "assistant"
         low = instruction.lower()
+        looks_cr = bool(
+            re.search(r"\bcompte[\s-]?rendus?\b", low)
+            or re.search(r"\bcr\s+(de|du|visite|reunion|réunion|client)\b", low)
+        )
         looks_mail = bool(
             re.search(
                 r"\b(envoie|envoyer|envoi|mail|e-mail|relance |relancer |message (à|a|pour)|préviens|previens|dis-lui|dis lui)\b",
@@ -163,10 +170,12 @@ async def run_orchestrator(payload: dict) -> dict:
             re.search(r"\d+\s*(min|minute|h|heure)", low) and re.search(r"avant|dans", low)
         )
         secondary = data.get("secondary_intent")
-        if looks_mail and looks_rdv:
+        if looks_cr:
+            agent = "redaction"
+        elif looks_mail and looks_rdv:
             agent = "planning"
             secondary = "mail"
-        elif looks_offset and not looks_mail:
+        elif looks_offset and not looks_mail and not looks_cr:
             agent = "planning"
 
         final_agent = agent
@@ -199,7 +208,9 @@ async def run_orchestrator(payload: dict) -> dict:
         relance_create = ["fais-moi penser", "fais moi penser", "rappelle-moi", "rappelle moi", "crée un rappel", "creer un rappel"]
         question_words = ["qu'est-ce", "quest-ce", "quels", "quelles", "ai-je", "est-ce que", "résume", "resume", "combien", "montre", "liste"]
 
-        if any(w in lower for w in question_words):
+        if re.search(r"\bcompte[\s-]?rendus?\b", lower):
+            agent = "redaction"
+        elif any(w in lower for w in question_words):
             agent = "assistant"
         elif any(w in lower for w in redaction_words):
             agent = "redaction"
