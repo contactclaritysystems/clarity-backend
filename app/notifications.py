@@ -564,7 +564,7 @@ def process_vocab(sb: Client, now: datetime, cache: dict, debug: list) -> List[s
             continue
         day_fr = now.strftime("%d/%m/%Y")
         n = len(pack)
-        subject = f"{n} mot{'s' if n > 1 else ''} pour aujourd'hui — {day_fr}"
+        subject = f"{n} mots pour mieux s'exprimer — {day_fr}"
         body = block + "<p>— Clarity</p>"
         result = send_email(email, subject, body, html=True)
         if result == "ok":

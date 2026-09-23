@@ -90,30 +90,36 @@ NEEDED = 7
 
 def generate_new_words(exclude: List[str], count: int = 5) -> List[dict]:
     banned = ", ".join(list(dict.fromkeys((exclude or []) + list(BANAL)))[:120])
-    prompt = f"""Donne EXACTEMENT {count} mots français.
-Niveau : adulte soigné qui parle bien, SANS être un dictionnaire rare.
-À éviter absolument :
-- mots trop banals (évoluer, soutenir, découverte, pertinent, bienveillance, important, améliorer…)
-- mots trop savants ou vieillis (pérorer, amphigouri, lucubration…)
-Le juste milieu : un mot qu'on est content de caser dans une vraie phrase
-(ex. nuancer, cadrer, franc, tangible, relayer, trancher, serein, concret, diligent — ce sont des EXEMPLES, n'envoie pas toujours les mêmes).
-Varie verbes, noms, adjectifs.
-Interdits en plus : {banned}
+    prompt = f"""Donne EXACTEMENT {count} mots français pour un mail quotidien « mieux s'exprimer ».
+
+NIVEAU OBLIGATOIRE (comme ceci, ni plus plat ni plus pédant) :
+temporiser, circonspect, latitude, corroborer, réserve, atermoyer, laconique,
+discernement, concéder, sibyllin, préconiser, péremptoire, éluder, hiatus,
+parcimonieux, subodorer, mitigé, velléité, tempérer, inéluctable.
+Ce sont des EXEMPLES de niveau — n'envoie pas toujours les mêmes.
+
+Interdit : mots d'école primaire (évoluer, soutenir, découverte, pertinent,
+bienveillance, important, améliorer, changer, aider, simple…).
+Interdit aussi : mots de concours hors oral (amphigouri, lucubration, pérorer).
+
+Alterne verbe / adjectif / nom.
+Définition courte. 3 synonymes. Exemple à la 1re personne, oral, entre « ».
+
+Déjà envoyés, ne pas répéter : {banned}
 
 JSON uniquement :
 {{
   "words": [
     {{
       "word": "",
-      "definition": "une phrase simple",
+      "pos": "verbe|adjectif|nom",
+      "definition": "",
       "synonyms": ["", "", ""],
-      "example": "une phrase orale naturelle à la 1re personne si possible",
-      "register": "courant",
+      "example": "",
       "usefulness": 4
     }}
   ]
-}}
-usefulness 1–5 = utile à l'oral aujourd'hui."""
+}}"""
     resp = get_client().chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -137,18 +143,27 @@ usefulness 1–5 = utile à l'oral aujourd'hui."""
         except Exception:
             use = 3
         use = max(1, min(5, use))
+        if word.lower() in BANAL:
+            continue
+        pos = str(item.get("pos") or item.get("register") or "nom").lower()
+        if "verb" in pos:
+            pos = "verbe"
+        elif "adj" in pos:
+            pos = "adjectif"
+        elif "nom" in pos or "subst" in pos:
+            pos = "nom"
+        else:
+            pos = pos[:20] or "nom"
         out.append(
             {
                 "word": word[:80],
                 "definition": str(item.get("definition") or "")[:300],
                 "synonyms": syn_s,
                 "example": str(item.get("example") or "")[:300],
-                "register": str(item.get("register") or "courant")[:40],
+                "register": pos,
                 "usefulness": use,
             }
         )
-        if word.lower() in BANAL:
-            continue
         if len(out) >= count:
             break
     return out
@@ -239,34 +254,42 @@ def format_vocab_block(words: List[dict], html: bool = False) -> str:
     if not words:
         return ""
     n = len(words)
-    title = f"{n} mot{'s' if n > 1 else ''} pour aujourd'hui"
+    title = f"{n} mots pour mieux s'exprimer"
     if html:
-        parts = [f"<p><strong>{title}</strong></p>"]
-        for w in words:
+        parts = [f"<p><strong>{title}</strong></p><ol>"]
+        for i, w in enumerate(words, 1):
             name = str(w.get("word") or "")
-            review = w.get("kind") == "a_revoir"
-            head = f"<p><strong>{name}</strong>"
-            if review:
-                head += " <em>(à revoir)</em>"
-            head += "</p>"
-            parts.append(head)
+            pos = w.get("register") or ""
+            review = " — à revoir" if w.get("kind") == "a_revoir" else ""
+            label = f"{name}" + (f" ({pos})" if pos else "") + review
+            block = f"<li><strong>{label}</strong>"
             if w.get("definition"):
-                parts.append(f"<p>{w['definition']}</p>")
+                block += f"<br>{w['definition']}"
             if w.get("synonyms"):
-                parts.append(f"<p>Synonymes : {w['synonyms']}</p>")
+                block += f"<br>Synonymes : {w['synonyms']}"
             if w.get("example"):
-                parts.append(f"<p>Ex. {w['example']}</p>")
+                ex = str(w["example"]).strip()
+                if not ex.startswith("«"):
+                    ex = f"« {ex} »"
+                block += f"<br>{ex}"
+            block += "</li>"
+            parts.append(block)
+        parts.append("</ol>")
         return "\n".join(parts)
     lines = [title, ""]
-    for w in words:
-        tag = " (à revoir)" if w.get("kind") == "a_revoir" else ""
-        lines.append(f"• {w.get('word')}{tag}")
+    for i, w in enumerate(words, 1):
+        pos = f" ({w.get('register')})" if w.get("register") else ""
+        tag = " — à revoir" if w.get("kind") == "a_revoir" else ""
+        lines.append(f"{i}. {w.get('word')}{pos}{tag}")
         if w.get("definition"):
-            lines.append(f"  {w['definition']}")
+            lines.append(f"   {w['definition']}")
         if w.get("synonyms"):
-            lines.append(f"  Synonymes : {w['synonyms']}")
+            lines.append(f"   Synonymes : {w['synonyms']}")
         if w.get("example"):
-            lines.append(f"  Ex. {w['example']}")
+            ex = str(w["example"]).strip()
+            if not ex.startswith("«"):
+                ex = f"« {ex} »"
+            lines.append(f"   {ex}")
         lines.append("")
     return "\n".join(lines)
 
