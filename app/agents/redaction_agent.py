@@ -281,17 +281,16 @@ Structure (n'affiche une section QUE s'il y a du contenu) :
 - Si visite / travaux / matériel dans le brief :
   Matériel à prévoir / Travaux à réaliser
 - Sinon (rendez-vous, réunion, point client) :
-  Déroulé — 2 à 4 phrases qui RELIENT les points (pas une liste brute).
-  Décisions — uniquement ce qui a été validé / décidé.
-  À faire — envois, relances, prochaines étapes CITÉS.
+  Déroulé — 1 ou 2 phrases factuelles.
+  Décisions — seulement ce qui a été validé.
+  À faire — une puce par action citée, rien autour.
 
 Rédaction :
-- Les notes dictées sont brutes : transforme-les en phrases correctes.
-- Un point « planning validé » → « Le planning proposé a été validé. »
-- Pas de numérotation 1. 2. 3. 4. si tu peux faire des phrases + puces.
-- Pas de répétition (ne pas écrire « Prévoir » sous un titre « à prévoir »).
-- Pas de remplissage : « il est crucial », « aucun autre point », « voici le compte-rendu ».
-- Court, lisible, un cran plus rédigé que la dictée — jamais plus long pour faire joli.
+- Notes brutes → phrases correctes. Un cran plus lisible, PAS plus long.
+- « planning validé » → « Le planning proposé a été validé. »
+- INTERDIT d'ajouter un motif : attentes, parties prenantes, coordination,
+  bon suivi, clarifier, s'assurer, permettant de, afin de, il est crucial.
+- « récap demain » → « Envoyer le récapitulatif demain. » Rien d'autre.
 """
 
 WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
