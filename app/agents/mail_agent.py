@@ -195,7 +195,8 @@ Règles STRICTES de mise en page :
   INTERDIT : "je voulais te/vous rappeler", "rappel de notre rendez-vous",
   "je vous confirme" (sauf s'il a dit confirmé / c'est noté / c'est bon).
   INTERDIT d'inventer un autre type de message (relance, excuse, recap).
-- Objet : le créneau, rien d'autre (ex: "Demain 7h").
+- Objet : "RDV" + jour + heure (+ lieu si donné). Ex: "RDV demain 14h".
+  INTERDIT : seulement "Demain 14h" / "Mardi 9h" sans le mot RDV.
   INTERDIT : "Rappel de notre rendez-vous", "Confirmation de rendez-vous".
 - JSON uniquement : {"subject": "...", "body": "..."}
 
@@ -229,7 +230,7 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
         f"Signature obligatoire : {user_name}",
         "Si le contenu est un creneau de RDV : ecrire 'Je te/vous donne rendez-vous [jour] a [heure] [lieu]'.",
         "INTERDIT dans ce cas : confirmer, rappel, confirmation, c'est confirme.",
-        "Objet = jour + heure + lieu, jamais le mot Confirmation.",
+        "Objet = RDV + jour + heure + lieu (ex: RDV demain 14h). Jamais le mot Confirmation. Jamais seulement 'Demain 14h'.",
     ]
     if relationship and not style_block:
         parts.append(f"Relation : {relationship}")
@@ -246,8 +247,34 @@ async def write_email(content_summary: str, user_name: str, to_name: str = "",
         max_tokens=700,
         response_format={"type": "json_object"}
     )
-    return json.loads(response.choices[0].message.content)
+    data = json.loads(response.choices[0].message.content)
+    if isinstance(data, dict):
+        data["subject"] = normalize_rdv_subject(
+            data.get("subject") or "", content_summary or ""
+        )
+    return data
 
+
+_BARE_SLOT = re.compile(
+    r"^(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|après-demain|apres-demain|aujourd'hui|ce matin|cet après-midi)"
+    r"(\s+\d{1,2}\s*h(?:\s*\d{2})?)?$",
+    re.I,
+)
+
+
+def normalize_rdv_subject(subject: str, content: str = "") -> str:
+    s = (subject or "").strip()
+    blob = f"{s} {content or ''}".lower()
+    looks_rdv = any(
+        w in blob for w in ("rdv", "rendez-vous", "rendez vous", "créneau", "creneau")
+    )
+    if not s:
+        return s
+    if s.lower().startswith("rdv"):
+        return s
+    if looks_rdv and _BARE_SLOT.match(s.strip()):
+        return f"RDV {s}"
+    return s
 
 
 async def rewrite_email_to_style(subject: str, body: str, style: dict, user_name: str, to_name: str) -> dict:
@@ -291,8 +318,9 @@ async def rewrite_email_to_style(subject: str, body: str, style: dict, user_name
             response_format={"type": "json_object"},
         )
         data = json.loads(response.choices[0].message.content)
+        new_subj = data.get("subject") or subject
         return {
-            "subject": data.get("subject") or subject,
+            "subject": normalize_rdv_subject(new_subj, f"{subject} {body}"),
             "body": data.get("body") or body,
         }
     except Exception as e:
