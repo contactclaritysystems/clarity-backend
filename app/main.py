@@ -2,6 +2,8 @@ import os
 """
 Clarity Systems - Backend natif
 """
+from app.social_posts import router as social_router
+app.include_router(social_router)
 
 from dotenv import load_dotenv
 load_dotenv()
