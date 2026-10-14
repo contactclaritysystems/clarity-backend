@@ -32,7 +32,7 @@ _NOTIFY_TEST_LAST = {}
 app = FastAPI(
     title="Clarity Backend",
     description="Remplacement natif des webhooks Make",
-    version="0.2.0"
+    version="0.2.1"
 )
 
 app.add_middleware(
