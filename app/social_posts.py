@@ -7,13 +7,19 @@ import httpx
 router = APIRouter()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 @router.post("/social/generate-test")
 async def generate_test_post(user_id: str):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase non configuré")
+
     # 1. Récupérer les réglages
     profile = supabase.table("profiles").select(
         "social_enabled, social_frequency, social_length, social_context, social_logo_url, email"
