@@ -2,18 +2,13 @@ import os
 """
 Clarity Systems - Backend natif
 """
-from app.social_posts import router as social_router
-app.include_router(social_router)
-
 from dotenv import load_dotenv
 load_dotenv()
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
-
 from app.orchestrator import run_orchestrator
 from app.agents.mail_agent import run_mail_agent
 from app.agents.planning_agent import run_planning_agent
@@ -30,6 +25,7 @@ from app.tasks import list_tasks, create_task, update_task, delete_task
 from app.contact_activity import get_activity, patch_contact, log_sent_mail
 from app.mail_send import send_user_mail
 from app.track import router as track_router
+from app.social_posts import router as social_router
 
 _NOTIFY_TEST_LAST = {}
 
@@ -46,8 +42,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(track_router)
 
+app.include_router(track_router)
+app.include_router(social_router)
 
 class OrchestratorPayload(BaseModel):
     request_id: Optional[str] = None
@@ -57,7 +54,6 @@ class OrchestratorPayload(BaseModel):
     instruction: str
     conversation_history: Optional[str] = ""
     last_agent: Optional[str] = ""
-
 
 class AgentPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -79,7 +75,6 @@ class AgentPayload(BaseModel):
     to_name: Optional[str] = None
     cc: Optional[Any] = None
     cc_name: Optional[str] = None
-    # Planning / Relances (slot-filling)
     reason: Optional[str] = None
     contact_name: Optional[str] = None
     message_context: Optional[str] = None
@@ -90,33 +85,26 @@ class AgentPayload(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     conversation_history: Optional[str] = None
-    # Rédaction — formulaire
     form_answers: Optional[dict] = None
     answers: Optional[dict] = None
     original_instruction: Optional[str] = None
     style_key: Optional[str] = None
     style_id: Optional[str] = None
 
-
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "Clarity Backend", "version": "0.2.0"}
-
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
 
-
-
 class NotifyTestPayload(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
-
 @app.post("/notify/test")
 async def notify_test(payload: NotifyTestPayload):
-    """Envoi immédiat d'un e-mail test (onboarding anti-spam)."""
     email = (payload.user_email or "").strip()
     if not email:
         return {"success": False, "message": "Adresse e-mail manquante."}
@@ -146,8 +134,6 @@ async def notify_test(payload: NotifyTestPayload):
         }
     return {"success": False, "message": "Impossible d'envoyer le test pour le moment."}
 
-
-
 class DigestSettingsPayload(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
@@ -158,13 +144,11 @@ class DigestSettingsPayload(BaseModel):
     vocab_enabled: Optional[bool] = None
     vocab_time: Optional[str] = None
 
-
 @app.get("/vocab")
 async def vocab_history(user_id: str = ""):
     if not user_id:
         return {"success": False, "message": "user_id manquant", "words": []}
     return history_payload(user_id)
-
 
 @app.get("/notify/settings")
 async def notify_settings_get(user_id: str = ""):
@@ -173,18 +157,15 @@ async def notify_settings_get(user_id: str = ""):
     s = get_digest_settings(user_id)
     return {"success": True, "settings": s, **s}
 
-
 @app.post("/notify/settings")
 async def notify_settings_post(payload: DigestSettingsPayload):
     if not payload.user_id:
         return {"success": False, "message": "user_id manquant"}
     return save_digest_settings(payload.user_id, payload.digest_enabled, payload.digest_time, payload.user_email, payload.reminder_offset, payload.appointment_offset, payload.vocab_enabled, payload.vocab_time)
 
-
 @app.get("/cron/notifications")
 @app.post("/cron/notifications")
 async def cron_notifications(request: Request):
-    """Appelé toutes les 2 min (cron-job.org). Protégé par CRON_SECRET."""
     secret = os.getenv("CRON_SECRET") or ""
     q = request.query_params.get("secret") or ""
     auth = request.headers.get("authorization") or ""
@@ -194,11 +175,6 @@ async def cron_notifications(request: Request):
     if secret and token != secret:
         return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
     return run_notification_pass()
-
-
-
-
-
 
 @app.get("/admin/telegram-test")
 async def admin_telegram_test(request: Request):
@@ -212,9 +188,7 @@ async def admin_telegram_test(request: Request):
 
 @app.get("/capabilities")
 async def capabilities_list():
-    """Liste disponible + bientôt (pour le bouton ? / réglages)."""
     return public_payload()
-
 
 class FeatureRequestPayload(BaseModel):
     user_id: Optional[str] = None
@@ -222,17 +196,14 @@ class FeatureRequestPayload(BaseModel):
     idea: str = ""
     source: Optional[str] = "help"
 
-
 @app.post("/feature-request")
 async def feature_request_endpoint(payload: FeatureRequestPayload):
-    """Une idée, un besoin ? — enregistre pour l'équipe Clarity."""
     return save_feature_request(
         user_id=payload.user_id,
         user_email=payload.user_email,
         idea=payload.idea,
         source=payload.source or "help",
     )
-
 
 @app.post("/orchestrator")
 async def orchestrator_endpoint(payload: OrchestratorPayload):
@@ -246,7 +217,6 @@ async def orchestrator_endpoint(payload: OrchestratorPayload):
             "request_id": payload.request_id
         }
 
-
 @app.post("/mail/send")
 async def mail_send_endpoint(payload: AgentPayload):
     try:
@@ -254,7 +224,6 @@ async def mail_send_endpoint(payload: AgentPayload):
     except Exception as e:
         print(f"[MAIL SEND] {e}")
         return {"success": False, "message": "Impossible d'envoyer le mail."}
-
 
 @app.post("/agent/mail")
 async def mail_agent_endpoint(payload: AgentPayload):
@@ -268,7 +237,6 @@ async def mail_agent_endpoint(payload: AgentPayload):
             "request_id": payload.request_id
         }
 
-
 @app.post("/agent/planning")
 async def planning_agent_endpoint(payload: AgentPayload):
     try:
@@ -281,21 +249,17 @@ async def planning_agent_endpoint(payload: AgentPayload):
             "request_id": payload.request_id
         }
 
-
 @app.post("/webhook/orchestrator")
 async def webhook_orchestrator(payload: OrchestratorPayload):
     return await orchestrator_endpoint(payload)
-
 
 @app.post("/webhook/mail")
 async def webhook_mail(payload: AgentPayload):
     return await mail_agent_endpoint(payload)
 
-
 @app.post("/webhook/planning")
 async def webhook_planning(payload: AgentPayload):
     return await planning_agent_endpoint(payload)
-
 
 @app.post("/agent/relance")
 async def relance_agent_endpoint(payload: AgentPayload):
@@ -309,8 +273,6 @@ async def relance_agent_endpoint(payload: AgentPayload):
             "request_id": payload.request_id
         }
 
-
-
 @app.post("/agent/taches")
 async def taches_agent_endpoint(payload: AgentPayload):
     try:
@@ -323,7 +285,6 @@ async def taches_agent_endpoint(payload: AgentPayload):
             "request_id": payload.request_id
         }
 
-
 @app.post("/agent/assistant")
 async def assistant_agent_endpoint(payload: AgentPayload):
     try:
@@ -335,7 +296,6 @@ async def assistant_agent_endpoint(payload: AgentPayload):
             "message": f"Erreur agent assistant: {str(e)}",
             "request_id": payload.request_id
         }
-
 
 @app.post("/agent/redaction")
 async def redaction_agent_endpoint(payload: AgentPayload):
@@ -353,12 +313,9 @@ async def redaction_agent_endpoint(payload: AgentPayload):
 async def webhook_relance(payload: AgentPayload):
     return await relance_agent_endpoint(payload)
 
-
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
-
 
 class StyleCreatePayload(BaseModel):
     user_id: str
@@ -370,7 +327,6 @@ class StyleCreatePayload(BaseModel):
     opening: Optional[str] = ""
     closing: Optional[str] = ""
 
-
 @app.get("/styles/{user_id}")
 async def styles_list(user_id: str):
     try:
@@ -379,7 +335,6 @@ async def styles_list(user_id: str):
     except Exception as e:
         return {"success": False, "message": str(e), "styles": []}
 
-
 @app.post("/styles")
 async def styles_create(payload: StyleCreatePayload):
     try:
@@ -387,12 +342,9 @@ async def styles_create(payload: StyleCreatePayload):
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-
 @app.delete("/styles/{style_id}")
 async def styles_delete(style_id: str, user_id: str = ""):
     return delete_style(user_id, style_id=style_id)
-
-
 
 class TaskPayload(BaseModel):
     user_id: Optional[str] = None
@@ -401,43 +353,34 @@ class TaskPayload(BaseModel):
     status: Optional[str] = None
     task_id: Optional[str] = None
 
-
 @app.get("/tasks")
 async def tasks_list(user_id: str = ""):
     return list_tasks(user_id)
-
 
 @app.post("/tasks")
 async def tasks_create(payload: TaskPayload):
     return create_task(payload.user_id or "", payload.titre or "", payload.due_date)
 
-
 @app.patch("/tasks/{task_id}")
 async def tasks_update(task_id: str, payload: TaskPayload):
     return update_task(payload.user_id or "", task_id, payload.status, payload.titre)
 
-
 @app.delete("/tasks/{task_id}")
 async def tasks_delete(task_id: str, user_id: str = ""):
     return delete_task(user_id, task_id)
-
 
 class ContactPatchPayload(BaseModel):
     user_id: Optional[str] = None
     tags: Optional[list] = None
     notes_internes: Optional[str] = None
 
-
 @app.get("/contacts/{contact_id}/activity")
 async def contact_activity(contact_id: str, user_id: str = ""):
     return get_activity(user_id, contact_id)
 
-
 @app.patch("/contacts/{contact_id}")
 async def contact_patch(contact_id: str, payload: ContactPatchPayload):
     return patch_contact(payload.user_id or "", contact_id, payload.tags, payload.notes_internes)
-
-
 
 class SentMailPayload(BaseModel):
     user_id: Optional[str] = None
@@ -445,10 +388,8 @@ class SentMailPayload(BaseModel):
     to_email: Optional[str] = None
     subject: Optional[str] = None
 
-
 @app.post("/mails/sent")
 async def mails_sent(payload: SentMailPayload):
-    """Appelé après un envoi réel (dashboard ou Make)."""
     return log_sent_mail(
         payload.user_id or "",
         payload.subject or "",
