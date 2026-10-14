@@ -25,7 +25,7 @@ from app.tasks import list_tasks, create_task, update_task, delete_task
 from app.contact_activity import get_activity, patch_contact, log_sent_mail
 from app.mail_send import send_user_mail
 from app.track import router as track_router
-from app.social_posts import router as social_router
+# from app.social_posts import router as social_router
 
 _NOTIFY_TEST_LAST = {}
 
@@ -44,7 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(track_router)
-app.include_router(social_router)
+# app.include_router(social_router)
 
 class OrchestratorPayload(BaseModel):
     request_id: Optional[str] = None
