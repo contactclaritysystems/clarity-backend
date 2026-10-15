@@ -1,19 +1,11 @@
 import os
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
-from supabase import create_client
 import httpx
 
 router = APIRouter()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
-
-supabase = None
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -24,23 +16,11 @@ class GeneratePayload(BaseModel):
 
 @router.post("/social/generate")
 async def generate_posts(payload: GeneratePayload):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase non configuré")
     if not OPENAI_API_KEY:
-        raise HTTPException(status_code=500, detail="OpenAI non configuré")
+        return {"success": False, "message": "Clé OpenAI manquante sur le serveur."}
 
-    user_id = payload.user_id
     theme = (payload.theme or "").strip()
     platforms = payload.platforms or ["instagram"]
-
-    # Récupérer le contexte
-    profile = supabase.table("profiles").select(
-        "social_context, social_length, email"
-    ).eq("id", user_id).single().execute()
-
-    context = (profile.data or {}).get("social_context") or "activité non précisée"
-    length = (profile.data or {}).get("social_length") or "moyen"
-
     posts = []
 
     async with httpx.AsyncClient() as client:
@@ -48,23 +28,18 @@ async def generate_posts(payload: GeneratePayload):
             platform = platform.lower()
             prompt = f"""Tu es Clarity. Tu rédiges une publication pour {platform}.
 
-Contexte de l'activité :
-{context}
-
-Thème demandé : {theme or "aucun thème particulier"}
-
-Longueur : {length}
+Thème : {theme or "aucun thème particulier"}
 
 Règles :
 - Accroche forte dès la première ligne.
 - Une seule idée claire.
-- Texte naturel et fluide.
-- Adapte le ton et la longueur à {platform}.
-- Ajoute 3 à 5 hashtags pertinents.
-- N’invente jamais de résultats ou de chiffres.
+- Texte naturel.
+- Adapte le ton à {platform}.
+- 3 à 5 hashtags.
+- N’invente rien.
 
-Réponds uniquement en JSON valide :
-{{"caption": "texte de la publication", "hashtags": ["#hashtag1", "#hashtag2"]}}"""
+Réponds uniquement en JSON :
+{{"caption": "texte", "hashtags": ["#a", "#b"]}}"""
 
             try:
                 resp = await client.post(
@@ -75,37 +50,23 @@ Réponds uniquement en JSON valide :
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7
                     },
-                    timeout=60
+                    timeout=45
                 )
                 resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
-                content = content.strip()
+                content = resp.json()["choices"][0]["message"]["content"].strip()
                 if content.startswith("```"):
                     content = content.split("```")[1]
                     if content.startswith("json"):
                         content = content[4:]
                 data = json.loads(content.strip())
-
-                caption = data.get("caption", "")
-                hashtags = data.get("hashtags", [])
-
-                # Enregistrer
-                supabase.table("social_posts").insert({
-                    "user_id": user_id,
-                    "angle": theme or "publication",
-                    "body": caption,
-                    "platform": platform,
-                    "status": "generated"
-                }).execute()
-
                 posts.append({
                     "platform": platform,
-                    "caption": caption,
-                    "image_url": None,  # image plus tard
-                    "hashtags": hashtags
+                    "caption": data.get("caption", ""),
+                    "image_url": None,
+                    "hashtags": data.get("hashtags", [])
                 })
             except Exception as e:
-                print(f"[SOCIAL] Erreur {platform}: {e}")
+                print(f"[SOCIAL] {platform}: {e}")
                 posts.append({
                     "platform": platform,
                     "caption": "Impossible de générer ce post pour le moment.",
