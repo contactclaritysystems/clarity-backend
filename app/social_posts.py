@@ -1,6 +1,6 @@
 import os
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List
 from supabase import create_client
@@ -14,7 +14,8 @@ supabase = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception:
+    except Exception as e:
+        print(f"[SOCIAL] supabase: {e}")
         supabase = None
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -24,6 +25,7 @@ class GeneratePayload(BaseModel):
     theme: Optional[str] = ""
     platforms: List[str] = ["instagram"]
     with_emojis: Optional[bool] = True
+    logo_url: Optional[str] = None
 
 @router.post("/social/generate")
 async def generate_posts(payload: GeneratePayload):
@@ -34,6 +36,7 @@ async def generate_posts(payload: GeneratePayload):
     theme = (payload.theme or "").strip()
     platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
     with_emojis = bool(payload.with_emojis)
+    logo_url = payload.logo_url
 
     context = "activité non précisée"
     length = "moyen"
@@ -93,10 +96,9 @@ Réponds uniquement en JSON :
                 caption = data.get("caption", "")
                 hashtags = data.get("hashtags", [])
 
-                # Image
                 image_url = None
                 try:
-                    img_prompt = f"Photo professionnelle épurée, style {platform}, sujet : {theme or context}. Pas de texte. Lumière naturelle."
+                    img_prompt = f"Photo professionnelle épurée pour {platform}, sujet : {theme or context}. Pas de texte. Lumière naturelle."
                     img = await client.post(
                         "https://api.openai.com/v1/images/generations",
                         headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -106,10 +108,12 @@ Réponds uniquement en JSON :
                             "n": 1,
                             "size": "1024x1024"
                         },
-                        timeout=50
+                        timeout=60
                     )
-                    img.raise_for_status()
-                    image_url = img.json()["data"][0]["url"]
+                    if img.status_code == 200:
+                        image_url = img.json()["data"][0]["url"]
+                    else:
+                        print(f"[SOCIAL] image {platform}: {img.status_code} {img.text[:150]}")
                 except Exception as e:
                     print(f"[SOCIAL] image {platform}: {e}")
 
@@ -120,7 +124,7 @@ Réponds uniquement en JSON :
                     "hashtags": hashtags
                 })
             except Exception as e:
-                print(f"[SOCIAL] {platform}: {e}")
+                print(f"[SOCIAL] text {platform}: {e}")
                 posts.append({
                     "platform": platform,
                     "caption": "Impossible de générer.",
@@ -129,3 +133,20 @@ Réponds uniquement en JSON :
                 })
 
     return {"success": True, "posts": posts}
+
+@router.post("/social/logo")
+async def upload_logo(user_id: str = Form(...), file: UploadFile = File(...)):
+    if not supabase:
+        return {"success": False, "message": "Supabase non configuré."}
+    try:
+        content = await file.read()
+        path = f"{user_id}/logo.png"
+        supabase.storage.from_("social-logos").upload(
+            path, content, {"content-type": file.content_type or "image/png", "upsert": "true"}
+        )
+        public_url = supabase.storage.from_("social-logos").get_public_url(path)
+        supabase.table("profiles").update({"social_logo_url": public_url}).eq("id", user_id).execute()
+        return {"success": True, "logo_url": public_url}
+    except Exception as e:
+        print(f"[SOCIAL] logo: {e}")
+        return {"success": False, "message": "Impossible d'envoyer le logo."}
