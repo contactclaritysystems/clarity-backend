@@ -1,6 +1,8 @@
 import os
 import json
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List
 from supabase import create_client
 import httpx
 
@@ -15,81 +17,100 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-@router.post("/social/generate-test")
-async def generate_test_post(user_id: str):
+class GeneratePayload(BaseModel):
+    user_id: str
+    theme: Optional[str] = ""
+    platforms: List[str] = ["instagram"]
+
+@router.post("/social/generate")
+async def generate_posts(payload: GeneratePayload):
     if not supabase:
         raise HTTPException(status_code=500, detail="Supabase non configuré")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI non configuré")
 
-    # 1. Récupérer les réglages
+    user_id = payload.user_id
+    theme = (payload.theme or "").strip()
+    platforms = payload.platforms or ["instagram"]
+
+    # Récupérer le contexte
     profile = supabase.table("profiles").select(
-        "social_enabled, social_frequency, social_length, social_context, social_logo_url, email"
+        "social_context, social_length, email"
     ).eq("id", user_id).single().execute()
 
-    if not profile.data or not profile.data.get("social_enabled"):
-        raise HTTPException(status_code=400, detail="Publications automatiques non activées")
+    context = (profile.data or {}).get("social_context") or "activité non précisée"
+    length = (profile.data or {}).get("social_length") or "moyen"
 
-    context = profile.data.get("social_context") or "activité non précisée"
-    length = profile.data.get("social_length") or "moyen"
-    email = profile.data.get("email")
+    posts = []
 
-    # 2. Derniers angles
-    recent = supabase.table("social_posts").select("angle").eq("user_id", user_id).order("created_at", desc=True).limit(12).execute()
-    used_angles = [r["angle"] for r in (recent.data or []) if r.get("angle")]
+    async with httpx.AsyncClient() as client:
+        for platform in platforms:
+            platform = platform.lower()
+            prompt = f"""Tu es Clarity. Tu rédiges une publication pour {platform}.
 
-    # 3. Génération texte
-    prompt = f"""Tu es Clarity. Tu rédiges une publication réseaux sociaux.
-
-Contexte :
+Contexte de l'activité :
 {context}
+
+Thème demandé : {theme or "aucun thème particulier"}
 
 Longueur : {length}
 
-Objectif :
-- Accroche forte dès la première ligne (donne envie de continuer).
+Règles :
+- Accroche forte dès la première ligne.
 - Une seule idée claire.
-- Texte fluide, naturel, qui se lit jusqu’au bout.
-- Fin qui pousse à réagir (commentaire, like ou message).
-- N’invente jamais de résultats, chiffres, témoignages ou promesses non présents dans le contexte.
-- Évite ces angles déjà utilisés : {', '.join(used_angles) or 'aucun'}.
+- Texte naturel et fluide.
+- Adapte le ton et la longueur à {platform}.
+- Ajoute 3 à 5 hashtags pertinents.
+- N’invente jamais de résultats ou de chiffres.
 
 Réponds uniquement en JSON valide :
-{{"angle": "description courte du nouvel angle", "body": "texte complet de la publication"}}"""
+{{"caption": "texte de la publication", "hashtags": ["#hashtag1", "#hashtag2"]}}"""
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7
-            },
-            timeout=60
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        # Nettoyage basique si le modèle met des ```json
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-        data = json.loads(content.strip())
+            try:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    json={
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7
+                    },
+                    timeout=60
+                )
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"]
+                content = content.strip()
+                if content.startswith("```"):
+                    content = content.split("```")[1]
+                    if content.startswith("json"):
+                        content = content[4:]
+                data = json.loads(content.strip())
 
-    angle = data.get("angle", "publication")
-    body = data.get("body", "")
+                caption = data.get("caption", "")
+                hashtags = data.get("hashtags", [])
 
-    # 4. Enregistrer
-    supabase.table("social_posts").insert({
-        "user_id": user_id,
-        "angle": angle,
-        "body": body,
-        "status": "sent"
-    }).execute()
+                # Enregistrer
+                supabase.table("social_posts").insert({
+                    "user_id": user_id,
+                    "angle": theme or "publication",
+                    "body": caption,
+                    "platform": platform,
+                    "status": "generated"
+                }).execute()
 
-    return {
-        "success": True,
-        "angle": angle,
-        "body": body,
-        "email": email
-    }
+                posts.append({
+                    "platform": platform,
+                    "caption": caption,
+                    "image_url": None,  # image plus tard
+                    "hashtags": hashtags
+                })
+            except Exception as e:
+                print(f"[SOCIAL] Erreur {platform}: {e}")
+                posts.append({
+                    "platform": platform,
+                    "caption": "Impossible de générer ce post pour le moment.",
+                    "image_url": None,
+                    "hashtags": []
+                })
+
+    return {"success": True, "posts": posts}
