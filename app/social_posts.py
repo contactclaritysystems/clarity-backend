@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
@@ -23,6 +24,7 @@ class GeneratePayload(BaseModel):
     user_id: str
     theme: Optional[str] = ""
     platforms: List[str] = ["instagram"]
+    with_emojis: Optional[bool] = True
 
 @router.post("/social/generate")
 async def generate_posts(payload: GeneratePayload):
@@ -32,8 +34,8 @@ async def generate_posts(payload: GeneratePayload):
     user_id = payload.user_id
     theme = (payload.theme or "").strip()
     platforms = payload.platforms or ["instagram"]
+    with_emojis = payload.with_emojis if payload.with_emojis is not None else True
 
-    # Récupérer le contexte réel
     context = "activité non précisée"
     length = "moyen"
     if supabase:
@@ -43,41 +45,46 @@ async def generate_posts(payload: GeneratePayload):
                 context = res.data.get("social_context") or context
                 length = res.data.get("social_length") or length
         except Exception as e:
-            print(f"[SOCIAL] profile fetch: {e}")
+            print(f"[SOCIAL] profile: {e}")
 
     posts = []
     async with httpx.AsyncClient() as client:
         for platform in platforms:
             platform = platform.lower()
-            prompt = f"""Tu es Clarity. Tu rédiges une publication pour {platform}.
 
-Contexte de l'activité de l'utilisateur :
+            emoji_rule = "Utilise 1 à 3 smileys pertinents, pas plus." if with_emojis else "N’utilise aucun smiley ni emoji."
+
+            prompt = f"""Tu es Clarity. Tu rédiges une publication professionnelle pour {platform}.
+
+Contexte de l'activité :
 {context}
 
-Thème demandé : {theme or "aucun"}
+Thème : {theme or "aucun"}
 
-Longueur souhaitée : {length}
+Longueur : {length}
 
-Règles :
-- Parle uniquement de ce qui est dans le contexte.
-- Accroche forte dès la première ligne.
-- Une seule idée claire liée à l'activité.
-- Texte naturel et fluide.
-- Adapte le ton à {platform}.
-- 3 à 5 hashtags pertinents.
-- N’invente jamais de résultats, chiffres ou témoignages.
+Règles strictes :
+- Parle uniquement de ce qui est dans le contexte. N’invente rien.
+- Accroche forte et concrète dès la première ligne.
+- Une seule idée claire, utile pour le lecteur.
+- Texte naturel, fluide, qui se lit jusqu’au bout.
+- Adapte le ton et la longueur à {platform}.
+- {emoji_rule}
+- 3 à 5 hashtags pertinents à la fin.
+- Pas de phrases bateau du type « libérez-vous » ou « concentrez-vous sur l’essentiel » si ce n’est pas dans le contexte.
 
 Réponds uniquement en JSON valide :
-{{"caption": "texte de la publication", "hashtags": ["#a", "#b"]}}"""
+{{"caption": "texte complet", "hashtags": ["#a", "#b"]}}"""
 
             try:
+                # Texte
                 resp = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                     json={
                         "model": "gpt-4o-mini",
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.7
+                        "temperature": 0.65
                     },
                     timeout=45
                 )
@@ -88,11 +95,35 @@ Réponds uniquement en JSON valide :
                     if content.startswith("json"):
                         content = content[4:]
                 data = json.loads(content.strip())
+                caption = data.get("caption", "")
+                hashtags = data.get("hashtags", [])
+
+                # Image
+                image_url = None
+                try:
+                    img_prompt = f"Photo professionnelle, style épuré, pour une publication {platform} sur : {theme or context}. Pas de texte dans l'image. Lumière naturelle, composition claire."
+                    img_resp = await client.post(
+                        "https://api.openai.com/v1/images/generations",
+                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                        json={
+                            "model": "dall-e-3",
+                            "prompt": img_prompt,
+                            "n": 1,
+                            "size": "1024x1024",
+                            "quality": "standard"
+                        },
+                        timeout=60
+                    )
+                    img_resp.raise_for_status()
+                    image_url = img_resp.json()["data"][0]["url"]
+                except Exception as img_e:
+                    print(f"[SOCIAL] image {platform}: {img_e}")
+
                 posts.append({
                     "platform": platform,
-                    "caption": data.get("caption", ""),
-                    "image_url": None,
-                    "hashtags": data.get("hashtags", [])
+                    "caption": caption,
+                    "image_url": image_url,
+                    "hashtags": hashtags
                 })
             except Exception as e:
                 print(f"[SOCIAL] {platform}: {e}")
