@@ -35,10 +35,9 @@ async def generate_posts(payload: GeneratePayload):
     user_id = payload.user_id
     theme = (payload.theme or "").strip()
     platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
-    with_emojis = bool(payload.with_emojis) if payload.with_emojis is not None else True
-    logo_url = payload.logo_url
+    with_emojis = payload.with_emojis if payload.with_emojis is not None else True
 
-    print(f"[SOCIAL] platforms={platforms} with_emojis={with_emojis}")
+    print(f"[SOCIAL] with_emojis={with_emojis} platforms={platforms}")
 
     context = "activité non précisée"
     length = "moyen"
@@ -54,18 +53,19 @@ async def generate_posts(payload: GeneratePayload):
     shared_image_url = None
     async with httpx.AsyncClient() as client:
         try:
-            img_prompt = f"Photo professionnelle épurée, style moderne, sujet : {theme or context}. Pas de texte. Lumière naturelle."
+            img_prompt = f"Photo professionnelle épurée, style moderne, sujet : {theme or context}. Pas de texte dans l'image. Lumière naturelle."
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                 json={"model": "dall-e-3", "prompt": img_prompt, "n": 1, "size": "1024x1024"},
                 timeout=60
             )
+            print(f"[SOCIAL] image status: {img.status_code}")
             if img.status_code == 200:
                 shared_image_url = img.json()["data"][0]["url"]
-                print(f"[SOCIAL] image ok")
+                print("[SOCIAL] image OK")
             else:
-                print(f"[SOCIAL] image fail {img.status_code}: {img.text[:150]}")
+                print(f"[SOCIAL] image error: {img.text[:200]}")
         except Exception as e:
             print(f"[SOCIAL] image exception: {e}")
 
@@ -76,9 +76,12 @@ async def generate_posts(payload: GeneratePayload):
             elif platform == "linkedin":
                 hashtag_rule = "2 à 4 hashtags à la fin."
             else:
-                hashtag_rule = "Aucun hashtag, ou 1 maximum."
+                hashtag_rule = "Aucun hashtag."
 
-            emoji_rule = "1 à 3 smileys maximum." if with_emojis else "AUCUN smiley ni emoji. Interdiction stricte."
+            if with_emojis:
+                emoji_rule = "Utilise 1 à 3 smileys maximum."
+            else:
+                emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji, aucun symbole emoji. Texte 100% sans emoji."
 
             prompt = f"""Tu es Clarity. Post pour {platform}.
 
@@ -86,20 +89,23 @@ Contexte : {context}
 Thème : {theme or "aucun"}
 Longueur : {length}
 
-Règles :
+Règles obligatoires :
 - N’invente rien.
-- Accroche claire.
 - {emoji_rule}
 - {hashtag_rule}
 
-JSON uniquement :
-{{"caption": "texte", "hashtags": ["#a"]}}"""
+Réponds uniquement en JSON :
+{{"caption": "texte sans emoji si interdit", "hashtags": ["#a"]}}"""
 
             try:
                 resp = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5},
+                    json={
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.4
+                    },
                     timeout=40
                 )
                 resp.raise_for_status()
