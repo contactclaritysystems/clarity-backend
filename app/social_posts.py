@@ -57,7 +57,7 @@ async def generate_posts(payload: GeneratePayload):
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={"model": "dall-e-3", "prompt": img_prompt, "n": 1, "size": "1024x1024"},
+                json={"model": "dall-e-2", "prompt": img_prompt, "n": 1, "size": "1024x1024"},
                 timeout=60
             )
             print(f"[SOCIAL] image status: {img.status_code}")
