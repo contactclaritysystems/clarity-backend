@@ -62,10 +62,18 @@ async def generate_posts(payload: GeneratePayload):
             )
             print(f"[SOCIAL] image status: {img.status_code}")
             if img.status_code == 200:
-                shared_image_url = img.json()["data"][0]["url"]
+                data = img.json()
+                item = data["data"][0]
+                print(f"[SOCIAL] image keys: {list(item.keys())}")
+                if "url" in item:
+                    shared_image_url = item["url"]
+                elif "b64_json" in item:
+                    shared_image_url = f"data:image/png;base64,{item['b64_json']}"
+                else:
+                    print(f"[SOCIAL] format inconnu: {item}")
                 print("[SOCIAL] image OK")
             else:
-                print(f"[SOCIAL] image error: {img.text[:200]}")
+                print(f"[SOCIAL] image error: {img.text[:300]}")
         except Exception as e:
             print(f"[SOCIAL] image exception: {e}")
 
