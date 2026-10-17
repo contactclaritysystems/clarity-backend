@@ -49,9 +49,38 @@ async def generate_posts(payload: GeneratePayload):
         except Exception as e:
             print(f"[SOCIAL] profile: {e}")
 
-    posts = []
+    # Une seule image pour tous les réseaux
+    shared_image_url = None
     async with httpx.AsyncClient() as client:
+        try:
+            img_prompt = f"Photo professionnelle épurée, style moderne, sujet : {theme or context}. Pas de texte dans l'image. Lumière naturelle, composition claire et premium."
+            img = await client.post(
+                "https://api.openai.com/v1/images/generations",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json={
+                    "model": "dall-e-3",
+                    "prompt": img_prompt,
+                    "n": 1,
+                    "size": "1024x1024"
+                },
+                timeout=60
+            )
+            if img.status_code == 200:
+                shared_image_url = img.json()["data"][0]["url"]
+            else:
+                print(f"[SOCIAL] image error {img.status_code}: {img.text[:200]}")
+        except Exception as e:
+            print(f"[SOCIAL] image: {e}")
+
+        posts = []
         for platform in platforms:
+            if platform == "instagram":
+                hashtag_rule = "3 à 5 hashtags pertinents à la fin."
+            elif platform == "linkedin":
+                hashtag_rule = "2 à 4 hashtags professionnels à la fin."
+            else:  # facebook
+                hashtag_rule = "0 ou 1 hashtag maximum, ou aucun."
+
             emoji_rule = "Utilise 1 à 3 smileys maximum." if with_emojis else "Aucun smiley ni emoji."
 
             prompt = f"""Tu es Clarity. Publication professionnelle pour {platform}.
@@ -70,7 +99,7 @@ Règles :
 - Texte naturel.
 - Ton adapté à {platform}.
 - {emoji_rule}
-- 3 à 5 hashtags à la fin.
+- {hashtag_rule}
 
 Réponds uniquement en JSON :
 {{"caption": "texte", "hashtags": ["#a", "#b"]}}"""
@@ -96,31 +125,10 @@ Réponds uniquement en JSON :
                 caption = data.get("caption", "")
                 hashtags = data.get("hashtags", [])
 
-                image_url = None
-                try:
-                    img_prompt = f"Photo professionnelle épurée pour {platform}, sujet : {theme or context}. Pas de texte. Lumière naturelle."
-                    img = await client.post(
-                        "https://api.openai.com/v1/images/generations",
-                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                        json={
-                            "model": "dall-e-3",
-                            "prompt": img_prompt,
-                            "n": 1,
-                            "size": "1024x1024"
-                        },
-                        timeout=60
-                    )
-                    if img.status_code == 200:
-                        image_url = img.json()["data"][0]["url"]
-                    else:
-                        print(f"[SOCIAL] image {platform}: {img.status_code} {img.text[:150]}")
-                except Exception as e:
-                    print(f"[SOCIAL] image {platform}: {e}")
-
                 posts.append({
                     "platform": platform,
                     "caption": caption,
-                    "image_url": image_url,
+                    "image_url": shared_image_url,
                     "hashtags": hashtags
                 })
             except Exception as e:
@@ -128,11 +136,11 @@ Réponds uniquement en JSON :
                 posts.append({
                     "platform": platform,
                     "caption": "Impossible de générer.",
-                    "image_url": None,
+                    "image_url": shared_image_url,
                     "hashtags": []
                 })
 
-    return {"success": True, "posts": posts}
+    return {"success": True, "posts": posts, "shared_image_url": shared_image_url}
 
 @router.post("/social/logo")
 async def upload_logo(user_id: str = Form(...), file: UploadFile = File(...)):
