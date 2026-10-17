@@ -35,8 +35,10 @@ async def generate_posts(payload: GeneratePayload):
     user_id = payload.user_id
     theme = (payload.theme or "").strip()
     platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
-    with_emojis = bool(payload.with_emojis)
+    with_emojis = bool(payload.with_emojis) if payload.with_emojis is not None else True
     logo_url = payload.logo_url
+
+    print(f"[SOCIAL] platforms={platforms} with_emojis={with_emojis}")
 
     context = "activité non précisée"
     length = "moyen"
@@ -49,70 +51,55 @@ async def generate_posts(payload: GeneratePayload):
         except Exception as e:
             print(f"[SOCIAL] profile: {e}")
 
-    # Une seule image pour tous les réseaux
     shared_image_url = None
     async with httpx.AsyncClient() as client:
         try:
-            img_prompt = f"Photo professionnelle épurée, style moderne, sujet : {theme or context}. Pas de texte dans l'image. Lumière naturelle, composition claire et premium."
+            img_prompt = f"Photo professionnelle épurée, style moderne, sujet : {theme or context}. Pas de texte. Lumière naturelle."
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={
-                    "model": "dall-e-3",
-                    "prompt": img_prompt,
-                    "n": 1,
-                    "size": "1024x1024"
-                },
+                json={"model": "dall-e-3", "prompt": img_prompt, "n": 1, "size": "1024x1024"},
                 timeout=60
             )
             if img.status_code == 200:
                 shared_image_url = img.json()["data"][0]["url"]
+                print(f"[SOCIAL] image ok")
             else:
-                print(f"[SOCIAL] image error {img.status_code}: {img.text[:200]}")
+                print(f"[SOCIAL] image fail {img.status_code}: {img.text[:150]}")
         except Exception as e:
-            print(f"[SOCIAL] image: {e}")
+            print(f"[SOCIAL] image exception: {e}")
 
         posts = []
         for platform in platforms:
             if platform == "instagram":
-                hashtag_rule = "3 à 5 hashtags pertinents à la fin."
+                hashtag_rule = "3 à 5 hashtags à la fin."
             elif platform == "linkedin":
-                hashtag_rule = "2 à 4 hashtags professionnels à la fin."
-            else:  # facebook
-                hashtag_rule = "0 ou 1 hashtag maximum, ou aucun."
+                hashtag_rule = "2 à 4 hashtags à la fin."
+            else:
+                hashtag_rule = "Aucun hashtag, ou 1 maximum."
 
-            emoji_rule = "Utilise 1 à 3 smileys maximum." if with_emojis else "Aucun smiley ni emoji."
+            emoji_rule = "1 à 3 smileys maximum." if with_emojis else "AUCUN smiley ni emoji. Interdiction stricte."
 
-            prompt = f"""Tu es Clarity. Publication professionnelle pour {platform}.
+            prompt = f"""Tu es Clarity. Post pour {platform}.
 
-Contexte :
-{context}
-
+Contexte : {context}
 Thème : {theme or "aucun"}
-
 Longueur : {length}
 
 Règles :
-- Uniquement ce qui est dans le contexte. N’invente rien.
-- Accroche concrète dès la 1ère ligne.
-- Une seule idée claire.
-- Texte naturel.
-- Ton adapté à {platform}.
+- N’invente rien.
+- Accroche claire.
 - {emoji_rule}
 - {hashtag_rule}
 
-Réponds uniquement en JSON :
-{{"caption": "texte", "hashtags": ["#a", "#b"]}}"""
+JSON uniquement :
+{{"caption": "texte", "hashtags": ["#a"]}}"""
 
             try:
                 resp = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    json={
-                        "model": "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.6
-                    },
+                    json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}], "temperature": 0.5},
                     timeout=40
                 )
                 resp.raise_for_status()
@@ -122,14 +109,11 @@ Réponds uniquement en JSON :
                     if raw.startswith("json"):
                         raw = raw[4:]
                 data = json.loads(raw.strip())
-                caption = data.get("caption", "")
-                hashtags = data.get("hashtags", [])
-
                 posts.append({
                     "platform": platform,
-                    "caption": caption,
+                    "caption": data.get("caption", ""),
                     "image_url": shared_image_url,
-                    "hashtags": hashtags
+                    "hashtags": data.get("hashtags", [])
                 })
             except Exception as e:
                 print(f"[SOCIAL] text {platform}: {e}")
@@ -157,4 +141,4 @@ async def upload_logo(user_id: str = Form(...), file: UploadFile = File(...)):
         return {"success": True, "logo_url": public_url}
     except Exception as e:
         print(f"[SOCIAL] logo: {e}")
-        return {"success": False, "message": "Impossible d'envoyer le logo."}
+        return {"success": False, "message": "Erreur logo."}
