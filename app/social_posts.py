@@ -1,10 +1,14 @@
 import os
 import json
+import random
+import base64
+from io import BytesIO
 from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List
 from supabase import create_client
 import httpx
+from PIL import Image
 
 router = APIRouter()
 
@@ -20,12 +24,31 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+STYLES = [
+    "photo professionnelle moderne, lumière naturelle, fond épuré",
+    "style photo lifestyle, ambiance chaleureuse, lumière douce",
+    "photo corporate élégante, fond clair, composition aérée",
+    "style minimaliste, couleurs neutres, lumière du jour",
+    "photo dynamique, angle légèrement bas, ambiance positive",
+    "style contemporain, fond doux, mise en scène simple",
+]
+
 class GeneratePayload(BaseModel):
     user_id: str
     theme: Optional[str] = ""
     platforms: List[str] = ["instagram"]
     with_emojis: Optional[bool] = True
     logo_url: Optional[str] = None
+
+def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
+    logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
+    max_w = int(base_img.width * 0.18)
+    ratio = max_w / logo.width
+    logo = logo.resize((max_w, int(logo.height * ratio)), Image.LANCZOS)
+    margin = int(base_img.width * 0.03)
+    pos = (base_img.width - logo.width - margin, margin)
+    base_img.paste(logo, pos, logo)
+    return base_img
 
 @router.post("/social/generate")
 async def generate_posts(payload: GeneratePayload):
@@ -41,36 +64,57 @@ async def generate_posts(payload: GeneratePayload):
 
     context = "activité non précisée"
     length = "moyen"
+    logo_url = payload.logo_url
     if supabase:
         try:
-            res = supabase.table("profiles").select("social_context, social_length").eq("id", user_id).single().execute()
+            res = supabase.table("profiles").select("social_context, social_length, social_logo_url").eq("id", user_id).single().execute()
             if res.data:
                 context = res.data.get("social_context") or context
                 length = res.data.get("social_length") or length
+                logo_url = logo_url or res.data.get("social_logo_url")
         except Exception as e:
             print(f"[SOCIAL] profile: {e}")
 
     shared_image_url = None
     async with httpx.AsyncClient() as client:
         try:
-            img_prompt = f"Photo professionnelle épurée, style moderne, sujet : {theme or context}. Pas de texte dans l'image. Lumière naturelle."
+            style = random.choice(STYLES)
+            img_prompt = f"{style}. Sujet : {theme or context}. Pas de texte dans l'image. Composition claire, espace libre en haut à droite."
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                 json={"model": "gpt-image-2.5-sunburst", "prompt": img_prompt, "n": 1, "size": "1024x1024"},
-                timeout=60
+                timeout=90
             )
             print(f"[SOCIAL] image status: {img.status_code}")
             if img.status_code == 200:
                 data = img.json()
                 item = data["data"][0]
-                print(f"[SOCIAL] image keys: {list(item.keys())}")
-                if "url" in item:
-                    shared_image_url = item["url"]
-                elif "b64_json" in item:
-                    shared_image_url = f"data:image/png;base64,{item['b64_json']}"
+                if "b64_json" in item:
+                    img_bytes = base64.b64decode(item["b64_json"])
+                elif "url" in item:
+                    r = await client.get(item["url"])
+                    img_bytes = r.content
                 else:
-                    print(f"[SOCIAL] format inconnu: {item}")
+                    img_bytes = None
+
+                if img_bytes and logo_url:
+                    try:
+                        logo_resp = await client.get(logo_url)
+                        if logo_resp.status_code == 200:
+                            base = Image.open(BytesIO(img_bytes)).convert("RGBA")
+                            final = overlay_logo(base, logo_resp.content)
+                            buf = BytesIO()
+                            final.convert("RGB").save(buf, format="JPEG", quality=90)
+                            shared_image_url = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+                            print("[SOCIAL] logo applied")
+                        else:
+                            shared_image_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
+                    except Exception as e:
+                        print(f"[SOCIAL] logo overlay: {e}")
+                        shared_image_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
+                elif img_bytes:
+                    shared_image_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
                 print("[SOCIAL] image OK")
             else:
                 print(f"[SOCIAL] image error: {img.text[:300]}")
@@ -103,7 +147,7 @@ Règles obligatoires :
 - {hashtag_rule}
 
 Réponds uniquement en JSON :
-{{"caption": "texte sans emoji si interdit", "hashtags": ["#a"]}}"""
+{{"caption": "texte", "hashtags": ["#a"]}}"""
 
             try:
                 resp = await client.post(
@@ -112,7 +156,7 @@ Réponds uniquement en JSON :
                     json={
                         "model": "gpt-4o-mini",
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.4
+                        "temperature": 0.5
                     },
                     timeout=40
                 )
