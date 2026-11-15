@@ -33,6 +33,16 @@ STYLES = [
     "style contemporain, fond doux, mise en scène simple",
 ]
 
+THEMES = [
+    "Conseil client",
+    "Promotion / offre",
+    "Nouveauté",
+    "Témoignage / résultat",
+    "Coulisses / quotidien",
+    "Astuce productivité",
+    "Autre (précisez)"
+]
+
 class GeneratePayload(BaseModel):
     user_id: str
     theme: Optional[str] = ""
