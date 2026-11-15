@@ -46,6 +46,7 @@ THEMES = [
 class GeneratePayload(BaseModel):
     user_id: str
     theme: Optional[str] = ""
+    theme_other: Optional[str] = ""
     platforms: List[str] = ["instagram"]
     with_emojis: Optional[bool] = True
     logo_url: Optional[str] = None
@@ -53,7 +54,6 @@ class GeneratePayload(BaseModel):
 def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
     
-    # Logo plus grand et net
     max_w = int(base_img.width * 0.26)
     ratio = max_w / logo.width
     logo = logo.resize((max_w, int(logo.height * ratio)), Image.LANCZOS)
@@ -70,10 +70,10 @@ async def generate_posts(payload: GeneratePayload):
     if not OPENAI_API_KEY:
         return {"success": False, "message": "Clé OpenAI manquante."}
 
-        user_id = payload.user_id
+    user_id = payload.user_id
     theme = (payload.theme or "").strip()
     if theme == "Autre (précisez)":
-        theme = (getattr(payload, "theme_other", None) or "").strip()
+        theme = (payload.theme_other or "").strip()
     platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
     with_emojis = payload.with_emojis if payload.with_emojis is not None else True
 
@@ -152,19 +152,22 @@ async def generate_posts(payload: GeneratePayload):
             else:
                 emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji, aucun symbole emoji. Texte 100% sans emoji."
 
-            prompt = f"""Tu es Clarity. Post pour {platform}.
+            prompt = f"""Tu es Clarity. Tu écris un post {platform} pour un indépendant / artisan.
 
-Contexte : {context}
-Thème : {theme or "aucun"}
+Contexte de l'activité : {context}
+Thème demandé : {theme or "aucun thème particulier"}
 Longueur : {length}
 
-Règles obligatoires :
-- N’invente rien.
+Règles :
+- Écris comme un humain, pas comme une pub.
+- Pas de formules toutes faites (« Nous sommes ravis », « N’hésitez pas », « Ensemble façonnons »).
+- Va droit au but, avec un ton naturel et direct.
 - {emoji_rule}
 - {hashtag_rule}
+- N’invente aucun détail qui n’est pas dans le contexte ou le thème.
 
 Réponds uniquement en JSON :
-{{"caption": "texte", "hashtags": ["#a"]}}"""
+{{"caption": "texte du post", "hashtags": ["#exemple"]}}"""
 
             try:
                 resp = await client.post(
