@@ -99,7 +99,8 @@ async def generate_posts(payload: GeneratePayload):
     async with httpx.AsyncClient() as client:
         try:
             style = random.choice(STYLES)
-            img_prompt = f"{style}. Sujet : {theme or context}. Lumière plus contrastée, composition dynamique, regard fort. Pas de texte dans l'image. Espace libre en haut à droite pour un logo."
+            # Image prompt : thème + contexte métier obligatoire
+            img_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique, regard fort. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Image cohérente avec l'activité décrite."
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
