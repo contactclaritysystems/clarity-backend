@@ -43,24 +43,16 @@ class GeneratePayload(BaseModel):
 def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
     
-    # Logo plus grand
-    max_w = int(base_img.width * 0.24)
+    # Logo plus grand et net
+    max_w = int(base_img.width * 0.26)
     ratio = max_w / logo.width
     logo = logo.resize((max_w, int(logo.height * ratio)), Image.LANCZOS)
     
-    # Contour blanc fin pour le contraste
-    outline = Image.new("RGBA", (logo.width + 6, logo.height + 6), (0, 0, 0, 0))
-    for dx in range(-2, 3):
-        for dy in range(-2, 3):
-            if dx != 0 or dy != 0:
-                outline.paste(logo, (dx + 3, dy + 3), logo)
-    outline.paste(logo, (3, 3), logo)
-    
     margin = int(base_img.width * 0.03)
-    pos = (base_img.width - outline.width - margin, margin)
+    pos = (base_img.width - logo.width - margin, margin)
     
     base_img = base_img.convert("RGBA")
-    base_img.paste(outline, pos, outline)
+    base_img.paste(logo, pos, logo)
     return base_img
 
 @router.post("/social/generate")
