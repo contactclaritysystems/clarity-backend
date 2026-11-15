@@ -72,6 +72,8 @@ async def generate_posts(payload: GeneratePayload):
 
     user_id = payload.user_id
     theme = (payload.theme or "").strip()
+if theme == "Autre (précisez)":
+    theme = (payload.theme_other or "").strip()
     platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
     with_emojis = payload.with_emojis if payload.with_emojis is not None else True
 
