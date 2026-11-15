@@ -47,6 +47,7 @@ def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     logo = logo.resize((max_w, int(logo.height * ratio)), Image.LANCZOS)
     margin = int(base_img.width * 0.03)
     pos = (base_img.width - logo.width - margin, margin)
+    base_img = base_img.convert("RGBA")
     base_img.paste(logo, pos, logo)
     return base_img
 
