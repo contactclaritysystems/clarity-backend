@@ -54,6 +54,12 @@ class GeneratePayload(BaseModel):
     with_emojis: Optional[bool] = True
     logo_url: Optional[str] = None
 
+class FeedbackPayload(BaseModel):
+    user_id: str
+    theme: Optional[str] = ""
+    liked: bool
+    comment: Optional[str] = ""
+
 def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
     
@@ -67,6 +73,42 @@ def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     base_img = base_img.convert("RGBA")
     base_img.paste(logo, pos, logo)
     return base_img
+
+def get_recent_feedback(user_id: str) -> str:
+    if not supabase:
+        return ""
+    try:
+        res = supabase.table("social_feedback").select("liked, comment").eq("user_id", user_id).order("created_at", desc=True).limit(5).execute()
+        if not res.data:
+            return ""
+        lines = []
+        for f in res.data:
+            status = "aime" if f.get("liked") else "n'aime pas"
+            comment = (f.get("comment") or "").strip()
+            if comment:
+                lines.append(f"- {status} : {comment}")
+            else:
+                lines.append(f"- {status}")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[SOCIAL] feedback read: {e}")
+        return ""
+
+@router.post("/social/feedback")
+async def save_feedback(payload: FeedbackPayload):
+    if not supabase:
+        return {"success": False, "message": "Supabase non configuré."}
+    try:
+        supabase.table("social_feedback").insert({
+            "user_id": payload.user_id,
+            "theme": payload.theme or "",
+            "liked": payload.liked,
+            "comment": payload.comment or ""
+        }).execute()
+        return {"success": True}
+    except Exception as e:
+        print(f"[SOCIAL] feedback save: {e}")
+        return {"success": False, "message": "Erreur enregistrement."}
 
 @router.post("/social/generate")
 async def generate_posts(payload: GeneratePayload):
@@ -95,11 +137,12 @@ async def generate_posts(payload: GeneratePayload):
         except Exception as e:
             print(f"[SOCIAL] profile: {e}")
 
+    feedback_text = get_recent_feedback(user_id)
+
     shared_image_url = None
     async with httpx.AsyncClient() as client:
         try:
             style = random.choice(STYLES)
-            # Image prompt : thème + contexte métier obligatoire
             img_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique, regard fort. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Image cohérente avec l'activité décrite."
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
@@ -156,6 +199,10 @@ async def generate_posts(payload: GeneratePayload):
             else:
                 emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji, aucun symbole emoji. Texte 100% sans emoji."
 
+            feedback_block = ""
+            if feedback_text:
+                feedback_block = f"\n\nRetours précédents de cet utilisateur (à respecter) :\n{feedback_text}"
+
             prompt = f"""Tu es Clarity. Tu écris un post {platform} pour un indépendant / artisan.
 
 Contexte de l'activité : {context}
@@ -169,6 +216,7 @@ Règles :
 - {emoji_rule}
 - {hashtag_rule}
 - N’invente aucun détail qui n’est pas dans le contexte ou le thème.
+{feedback_block}
 
 Réponds uniquement en JSON :
 {{"caption": "texte du post", "hashtags": ["#exemple"]}}"""
