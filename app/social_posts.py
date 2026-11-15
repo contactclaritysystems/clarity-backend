@@ -42,13 +42,22 @@ class GeneratePayload(BaseModel):
 
 def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
-    max_w = int(base_img.width * 0.18)
+    
+    # Logo plus grand (22% au lieu de 18%)
+    max_w = int(base_img.width * 0.22)
     ratio = max_w / logo.width
     logo = logo.resize((max_w, int(logo.height * ratio)), Image.LANCZOS)
-    margin = int(base_img.width * 0.03)
-    pos = (base_img.width - logo.width - margin, margin)
+    
+    # Fond légèrement sombre derrière le logo pour le contraste
+    padding = 18
+    bg = Image.new("RGBA", (logo.width + padding*2, logo.height + padding*2), (0, 0, 0, 90))
+    bg.paste(logo, (padding, padding), logo)
+    
+    margin = int(base_img.width * 0.025)
+    pos = (base_img.width - bg.width - margin, margin)
+    
     base_img = base_img.convert("RGBA")
-    base_img.paste(logo, pos, logo)
+    base_img.paste(bg, pos, bg)
     return base_img
 
 @router.post("/social/generate")
@@ -80,7 +89,7 @@ async def generate_posts(payload: GeneratePayload):
     async with httpx.AsyncClient() as client:
         try:
             style = random.choice(STYLES)
-            img_prompt = f"{style}. Sujet : {theme or context}. Pas de texte dans l'image. Composition claire, espace libre en haut à droite."
+            img_prompt = f"{style}. Sujet : {theme or context}. Lumière plus contrastée, composition dynamique, regard fort. Pas de texte dans l'image. Espace libre en haut à droite pour un logo."
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
