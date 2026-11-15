@@ -70,10 +70,10 @@ async def generate_posts(payload: GeneratePayload):
     if not OPENAI_API_KEY:
         return {"success": False, "message": "Clé OpenAI manquante."}
 
-    user_id = payload.user_id
+        user_id = payload.user_id
     theme = (payload.theme or "").strip()
-if theme == "Autre (précisez)":
-    theme = (payload.theme_other or "").strip()
+    if theme == "Autre (précisez)":
+        theme = (getattr(payload, "theme_other", None) or "").strip()
     platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
     with_emojis = payload.with_emojis if payload.with_emojis is not None else True
 
