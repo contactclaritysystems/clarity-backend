@@ -209,10 +209,12 @@ Contexte de l'activité : {context}
 Thème demandé : {theme or "aucun thème particulier"}
 Longueur : {length}
 
-Règles :
+Règles strictes :
 - Écris comme un humain, pas comme une pub.
 - Pas de formules toutes faites (« Nous sommes ravis », « N’hésitez pas », « Ensemble façonnons »).
 - Va droit au but, avec un ton naturel et direct.
+- INTERDICTION ABSOLUE de répéter la même idée ou la même phrase à la fin.
+- Si tu utilises un slogan (ex. « Parlez, Clarity fait le reste »), ne l’utilise qu’une seule fois, pas deux.
 - {emoji_rule}
 - {hashtag_rule}
 - N’invente aucun détail qui n’est pas dans le contexte ou le thème.
@@ -228,7 +230,7 @@ Réponds uniquement en JSON :
                     json={
                         "model": "gpt-4o-mini",
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.5
+                        "temperature": 0.4
                     },
                     timeout=40
                 )
