@@ -34,12 +34,15 @@ STYLES = [
 ]
 
 THEMES = [
-    "Conseil client",
-    "Promotion / offre",
-    "Nouveauté",
-    "Témoignage / résultat",
+    "Faire tester le produit / service",
+    "Gagner des abonnés",
+    "Avoir plus de commentaires",
+    "Obtenir des messages privés",
+    "Annoncer une nouveauté",
+    "Montrer un résultat client",
+    "Conseil / astuce utile",
     "Coulisses / quotidien",
-    "Astuce productivité",
+    "Offre limitée / promo",
     "Autre (précisez)"
 ]
 
