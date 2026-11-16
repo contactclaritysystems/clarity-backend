@@ -46,7 +46,7 @@ app.add_middleware(
 app.include_router(track_router)
 app.include_router(social_router)
 from app.social_cron import router as social_cron_router
-   app.include_router(social_cron_router)
+app.include_router(social_cron_router)
 
 class OrchestratorPayload(BaseModel):
     request_id: Optional[str] = None
