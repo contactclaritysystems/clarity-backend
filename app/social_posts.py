@@ -219,13 +219,13 @@ Règles strictes :
 - Va droit au but, ton naturel et direct.
 - INTERDICTION de répéter la même idée à la fin.
 - {emoji_rule}
-- Dans la légende (caption) : mets 2-3 mots importants en gras Unicode (utilise les caractères Mathematical Bold : 𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇 ou 𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭). Jamais de hashtags dans la légende.
-- Dans first_comment : mets {hashtag_count} + un call-to-action simple.{website_line}
+- Dans la légende (caption) : mets 2-3 mots importants en gras Unicode. Jamais de hashtags dans la légende.
+- Dans first_comment : écris un vrai commentaire naturel (1 ou 2 phrases max) qui encourage à interagir ou à en savoir plus. Mets ensuite 4 à 6 hashtags maximum à la fin.{website_line}
 - N’invente aucun détail qui n’est pas dans le contexte ou le thème.
 {feedback_block}
 
 Réponds uniquement en JSON :
-{{"caption": "légende avec 2-3 mots en gras Unicode", "first_comment": "hashtags + CTA + lien"}}"""
+{{"caption": "légende avec 2-3 mots en gras Unicode", "first_comment": "commentaire naturel + quelques hashtags"}}"""
 
             try:
                 resp = await client.post(
