@@ -127,13 +127,15 @@ async def generate_posts(payload: GeneratePayload):
     context = "activité non précisée"
     length = "moyen"
     logo_url = payload.logo_url
+    website = ""
     if supabase:
         try:
-            res = supabase.table("profiles").select("social_context, social_length, social_logo_url").eq("id", user_id).single().execute()
+            res = supabase.table("profiles").select("social_context, social_length, social_logo_url, website").eq("id", user_id).single().execute()
             if res.data:
                 context = res.data.get("social_context") or context
                 length = res.data.get("social_length") or length
                 logo_url = logo_url or res.data.get("social_logo_url")
+                website = (res.data.get("website") or "").strip()
         except Exception as e:
             print(f"[SOCIAL] profile: {e}")
 
@@ -188,20 +190,22 @@ async def generate_posts(payload: GeneratePayload):
         posts = []
         for platform in platforms:
             if platform == "instagram":
-                hashtag_rule = "3 à 5 hashtags à la fin."
+                hashtag_count = "8 à 12 hashtags"
             elif platform == "linkedin":
-                hashtag_rule = "2 à 4 hashtags à la fin."
+                hashtag_count = "3 à 5 hashtags"
             else:
-                hashtag_rule = "Aucun hashtag."
+                hashtag_count = "4 à 6 hashtags"
 
             if with_emojis:
-                emoji_rule = "Utilise 1 à 3 smileys maximum."
+                emoji_rule = "Utilise 1 à 3 smileys maximum dans la légende."
             else:
-                emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji, aucun symbole emoji. Texte 100% sans emoji."
+                emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji dans la légende."
 
             feedback_block = ""
             if feedback_text:
                 feedback_block = f"\n\nRetours précédents de cet utilisateur (à respecter) :\n{feedback_text}"
+
+            website_line = f"\n- Ajoute le lien du site à la fin du premier commentaire : {website}" if website else ""
 
             prompt = f"""Tu es Clarity. Tu écris un post {platform} pour un indépendant / artisan.
 
@@ -211,17 +215,17 @@ Longueur : {length}
 
 Règles strictes :
 - Écris comme un humain, pas comme une pub.
-- Pas de formules toutes faites (« Nous sommes ravis », « N’hésitez pas », « Ensemble façonnons »).
-- Va droit au but, avec un ton naturel et direct.
-- INTERDICTION ABSOLUE de répéter la même idée ou la même phrase à la fin.
-- Si tu utilises un slogan (ex. « Parlez, Clarity fait le reste »), ne l’utilise qu’une seule fois, pas deux.
+- Pas de formules toutes faites.
+- Va droit au but, ton naturel et direct.
+- INTERDICTION de répéter la même idée à la fin.
 - {emoji_rule}
-- {hashtag_rule}
+- Dans la légende (caption) : mets 2-3 mots importants en gras Unicode (utilise les caractères Mathematical Bold : 𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇 ou 𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭). Jamais de hashtags dans la légende.
+- Dans first_comment : mets {hashtag_count} + un call-to-action simple.{website_line}
 - N’invente aucun détail qui n’est pas dans le contexte ou le thème.
 {feedback_block}
 
 Réponds uniquement en JSON :
-{{"caption": "texte du post", "hashtags": ["#exemple"]}}"""
+{{"caption": "légende avec 2-3 mots en gras Unicode", "first_comment": "hashtags + CTA + lien"}}"""
 
             try:
                 resp = await client.post(
@@ -244,16 +248,16 @@ Réponds uniquement en JSON :
                 posts.append({
                     "platform": platform,
                     "caption": data.get("caption", ""),
-                    "image_url": shared_image_url,
-                    "hashtags": data.get("hashtags", [])
+                    "first_comment": data.get("first_comment", ""),
+                    "image_url": shared_image_url
                 })
             except Exception as e:
                 print(f"[SOCIAL] text {platform}: {e}")
                 posts.append({
                     "platform": platform,
                     "caption": "Impossible de générer.",
-                    "image_url": shared_image_url,
-                    "hashtags": []
+                    "first_comment": "",
+                    "image_url": shared_image_url
                 })
 
     return {"success": True, "posts": posts, "shared_image_url": shared_image_url}
