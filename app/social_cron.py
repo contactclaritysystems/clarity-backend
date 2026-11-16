@@ -5,6 +5,9 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter
 from supabase import create_client
 import httpx
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 router = APIRouter()
 
@@ -23,6 +26,44 @@ DAY_MAP = {
     5: "sat",
     6: "sun"
 }
+
+SMTP_HOST = os.getenv("NOTIFY_SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("NOTIFY_SMTP_PORT", "587"))
+SMTP_USER = os.getenv("NOTIFY_SMTP_USER")
+SMTP_PASS = os.getenv("NOTIFY_SMTP_PASS")
+SMTP_FROM = os.getenv("NOTIFY_FROM", SMTP_USER)
+
+def send_post_email(to_email: str, caption: str, image_url: str = None):
+    if not SMTP_USER or not SMTP_PASS:
+        print("[SOCIAL CRON] SMTP non configure")
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Votre post Instagram est pret"
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+      <h2 style="color:#1a1a1a;">Votre post est pret</h2>
+      <p style="white-space:pre-wrap;line-height:1.5;">{caption}</p>
+      {f'<img src="{image_url}" style="max-width:100%;border-radius:12px;margin-top:12px;" />' if image_url else ''}
+      <p style="color:#666;font-size:13px;margin-top:20px;">Copiez-collez directement dans Instagram.</p>
+    </div>
+    """
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_FROM, to_email, msg.as_string())
+        print(f"[SOCIAL CRON] Mail envoye a {to_email}")
+        return True
+    except Exception as e:
+        print(f"[SOCIAL CRON] Erreur mail: {e}")
+        return False
+
 
 @router.post("/cron/social-posts")
 async def send_scheduled_posts():
@@ -81,10 +122,9 @@ async def send_scheduled_posts():
                 caption = post.get("caption", "")
                 image_url = post.get("image_url")
 
-                print(f"[SOCIAL CRON] Post ready for {user.get('email')} : {caption[:80]}...")
-
-                # TODO: brancher l'envoi mail ici
-                sent += 1
+                email = user.get("email")
+                if email and send_post_email(email, caption, image_url):
+                    sent += 1
 
         return {"success": True, "sent": sent}
 
