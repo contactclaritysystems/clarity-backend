@@ -194,20 +194,20 @@ async def generate_posts(payload: GeneratePayload):
 - Texte court et accrocheur : 3 à 5 lignes maximum.
 - 3 à 5 hashtags maximum, ciblés et pertinents, à la fin de la légende.
 - NE JAMAIS mettre d'URL dans le post ni dans le premier commentaire.
-- Écrire exactement : « Découvrez Clarity, lien en bio. »
-- Premier commentaire : une question naturelle pour encourager les échanges."""
+- Terminer la légende par : « Lien en bio ».
+- Premier commentaire uniquement s'il apporte une vraie valeur (question utile). Sinon laisser vide."""
             elif platform == "facebook":
                 rules = """
 - Texte naturel et engageant : 3 à 6 lignes.
 - 0 à 2 hashtags maximum.
-- Lien du site cliquable à la fin de la publication.
-- Premier commentaire : une question naturelle (facultatif mais recommandé)."""
+- Lien https://clarity-systems.fr/ à la fin de la publication.
+- Premier commentaire uniquement s'il apporte une vraie valeur. Sinon laisser vide."""
             elif platform == "linkedin":
                 rules = """
-- Texte professionnel : 6 à 10 lignes, aéré, orienté bénéfices concrets.
-- 0 à 3 hashtags maximum, pertinents.
-- Lien du site cliquable à la fin de la publication, avant les hashtags.
-- Premier commentaire : une précision ou une vraie question (recommandé)."""
+- Texte professionnel, concret et crédible : 6 à 10 lignes, aéré, orienté bénéfices réels.
+- 0 à 3 hashtags maximum.
+- Lien du site à la fin de la publication.
+- Premier commentaire uniquement s'il apporte une vraie valeur (précision ou question). Sinon laisser vide."""
             else:
                 rules = "- Texte naturel. Hashtags limités. Lien si pertinent."
 
@@ -229,18 +229,21 @@ Thème demandé : {theme or "aucun thème particulier"}
 Longueur : {length}
 {website_info}
 
-Règles strictes pour {platform} :
+Règles obligatoires :
+- INTERDICTION ABSOLUE de caractères Markdown (**, ##, etc.). Texte brut uniquement.
+- Accroche différente et naturelle pour chaque réseau.
+- Éviter les formulations trop commerciales, génériques ou répétitives.
+- Ne jamais utiliser « tâches administratives ». Privilégier « organisation », « tâches répétitives », « gain de temps ».
+- Ne jamais inventer de fonctionnalités ou de résultats.
+- Varier les sujets et les accroches.
+- Écrire comme un humain premium, crédible, qui donne envie sans ressembler à une pub générée.
 {rules}
-- Écris comme un humain, pas comme une pub.
-- Commence par une accroche forte.
-- Privilégie les problèmes concrets et les avantages réels.
 - {emoji_rule}
 - Dans la légende : mets 2-3 mots importants en gras Unicode.
-- N’invente aucun détail qui n’est pas dans le contexte ou le thème.
 {feedback_block}
 
 Réponds uniquement en JSON :
-{{"caption": "légende adaptée au réseau avec 2-3 mots en gras Unicode", "first_comment": "question ou précision naturelle (jamais vide)"}}"""
+{{"caption": "légende adaptée au réseau avec 2-3 mots en gras Unicode", "first_comment": "valeur réelle ou chaîne vide"}}"""
 
             try:
                 resp = await client.post(
@@ -249,7 +252,7 @@ Réponds uniquement en JSON :
                     json={
                         "model": "gpt-4o-mini",
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.4
+                        "temperature": 0.5
                     },
                     timeout=40
                 )
