@@ -35,7 +35,7 @@ async def send_scheduled_posts():
 
     print(f"[SOCIAL CRON] {current_day} {current_time}")
 
-    try:
+    try:
         res = supabase.table("profiles").select(
             "id, email, social_context, social_length, social_logo_url, social_schedule_days"
         ).execute()
@@ -88,6 +88,6 @@ async def send_scheduled_posts():
 
         return {"success": True, "sent": sent}
 
-    except Exception as e:
+    except Exception as e:
         print(f"[SOCIAL CRON] error: {e}")
         return {"success": False, "message": str(e)}
