@@ -145,7 +145,7 @@ async def generate_posts(payload: GeneratePayload):
     async with httpx.AsyncClient() as client:
         try:
             style = random.choice(STYLES)
-            img_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique, regard fort. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Image cohérente avec l'activité décrite."
+            img_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique, regard fort. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Image cohérente avec l'activité décrite. Format vertical 4:5."
             img = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -190,42 +190,56 @@ async def generate_posts(payload: GeneratePayload):
         posts = []
         for platform in platforms:
             if platform == "instagram":
-                hashtag_count = "8 à 12 hashtags"
+                rules = """
+- Texte court et accrocheur : 3 à 5 lignes maximum.
+- 3 à 5 hashtags maximum, ciblés et pertinents, à la fin de la légende.
+- NE JAMAIS mettre d'URL dans le post. Écrire « Découvrez Clarity, lien en bio ».
+- Premier commentaire : une question naturelle pour encourager les échanges (facultatif mais recommandé)."""
+            elif platform == "facebook":
+                rules = """
+- Texte naturel et engageant : 3 à 6 lignes.
+- 0 à 2 hashtags maximum.
+- Lien directement à la fin de la publication.
+- Premier commentaire : facultatif, ne pas en ajouter d'artificiel."""
             elif platform == "linkedin":
-                hashtag_count = "3 à 5 hashtags"
+                rules = """
+- Texte professionnel : 6 à 10 lignes, aéré, orienté bénéfices concrets.
+- 0 à 3 hashtags maximum, pertinents.
+- Lien directement dans la publication.
+- Premier commentaire : facultatif, pour apporter une précision ou poser une vraie question."""
             else:
-                hashtag_count = "4 à 6 hashtags"
+                rules = "- Texte naturel. Hashtags limités. Lien si pertinent."
 
             if with_emojis:
                 emoji_rule = "Utilise 1 à 3 smileys maximum dans la légende."
             else:
-                emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji dans la légende."
+                emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji."
 
             feedback_block = ""
             if feedback_text:
                 feedback_block = f"\n\nRetours précédents de cet utilisateur (à respecter) :\n{feedback_text}"
 
-            website_line = f"\n- Ajoute le lien du site à la fin du premier commentaire : {website}" if website else ""
+            website_info = f"\nSite web de l'utilisateur : {website}" if website else ""
 
             prompt = f"""Tu es Clarity. Tu écris un post {platform} pour un indépendant / artisan.
 
 Contexte de l'activité : {context}
 Thème demandé : {theme or "aucun thème particulier"}
 Longueur : {length}
+{website_info}
 
-Règles strictes :
+Règles strictes pour {platform} :
+{rules}
 - Écris comme un humain, pas comme une pub.
-- Pas de formules toutes faites.
-- Va droit au but, ton naturel et direct.
-- INTERDICTION de répéter la même idée à la fin.
+- Commence par une accroche forte.
+- Privilégie les problèmes concrets et les avantages réels.
 - {emoji_rule}
-- Dans la légende (caption) : mets 2-3 mots importants en gras Unicode. Jamais de hashtags dans la légende.
-- Dans first_comment : écris un vrai commentaire naturel (1 ou 2 phrases max) qui encourage à interagir ou à en savoir plus. Mets ensuite 4 à 6 hashtags maximum à la fin.{website_line}
+- Dans la légende : mets 2-3 mots importants en gras Unicode.
 - N’invente aucun détail qui n’est pas dans le contexte ou le thème.
 {feedback_block}
 
 Réponds uniquement en JSON :
-{{"caption": "légende avec 2-3 mots en gras Unicode", "first_comment": "commentaire naturel + quelques hashtags"}}"""
+{{"caption": "légende adaptée au réseau avec 2-3 mots en gras Unicode", "first_comment": "commentaire naturel ou vide"}}"""
 
             try:
                 resp = await client.post(
