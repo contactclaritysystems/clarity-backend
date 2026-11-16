@@ -15,79 +15,79 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABAS
 PARIS = ZoneInfo("Europe/Paris")
 
 DAY_MAP = {
-    0: "mon",
-    1: "tue",
-    2: "wed",
-    3: "thu",
-    4: "fri",
-    5: "sat",
-    6: "sun"
+    0: "mon",
+    1: "tue",
+    2: "wed",
+    3: "thu",
+    4: "fri",
+    5: "sat",
+    6: "sun"
 }
 
 @router.post("/cron/social-posts")
 async def send_scheduled_posts():
-    if not supabase:
-        return {"success": False, "message": "Supabase non configuré"}
+    if not supabase:
+        return {"success": False, "message": "Supabase non configure"}
 
-    now = datetime.now(PARIS)
-    current_day = DAY_MAP[now.weekday()]
-    current_time = now.strftime("%H:%M")
+    now = datetime.now(PARIS)
+    current_day = DAY_MAP[now.weekday()]
+    current_time = now.strftime("%H:%M")
 
-    print(f"[SOCIAL CRON] {current_day} {current_time}")
+    print(f"[SOCIAL CRON] {current_day} {current_time}")
 
     try:
-        res = supabase.table("profiles").select(
-            "id, email, social_context, social_length, social_logo_url, social_schedule_days"
-        ).execute()
+        res = supabase.table("profiles").select(
+            "id, email, social_context, social_length, social_logo_url, social_schedule_days"
+        ).execute()
 
-        users = res.data or []
-        sent = 0
+        users = res.data or []
+        sent = 0
 
-        for user in users:
-            schedule = user.get("social_schedule_days") or {}
-            if isinstance(schedule, str):
-                try:
-                    schedule = json.loads(schedule)
-                except:
-                    schedule = {}
+        for user in users:
+            schedule = user.get("social_schedule_days") or {}
+            if isinstance(schedule, str):
+                try:
+                    schedule = json.loads(schedule)
+                except:
+                    schedule = {}
 
-            if not isinstance(schedule, dict):
-                continue
+            if not isinstance(schedule, dict):
+                continue
 
-            scheduled_time = schedule.get(current_day)
-            if not scheduled_time or scheduled_time != current_time:
-                continue
+            scheduled_time = schedule.get(current_day)
+            if not scheduled_time or scheduled_time != current_time:
+                continue
 
-            async with httpx.AsyncClient() as client:
-                gen = await client.post(
-                    "http://localhost:8000/social/generate",
-                    json={
-                        "user_id": user["id"],
-                        "theme": "Conseil / astuce utile",
-                        "platforms": ["instagram"],
-                        "with_emojis": True,
-                        "logo_url": user.get("social_logo_url")
-                    },
-                    timeout=120
-                )
-                if gen.status_code != 200:
-                    print(f"[SOCIAL CRON] gen fail {user['id']}")
-                    continue
-                data = gen.json()
-                if not data.get("success") or not data.get("posts"):
-                    continue
+            async with httpx.AsyncClient() as client:
+                gen = await client.post(
+                    "http://localhost:8000/social/generate",
+                    json={
+                        "user_id": user["id"],
+                        "theme": "Conseil / astuce utile",
+                        "platforms": ["instagram"],
+                        "with_emojis": True,
+                        "logo_url": user.get("social_logo_url")
+                    },
+                    timeout=120
+                )
+                if gen.status_code != 200:
+                    print(f"[SOCIAL CRON] gen fail {user['id']}")
+                    continue
+                data = gen.json()
+                if not data.get("success") or not data.get("posts"):
+                    continue
 
-                post = data["posts"][0]
-                caption = post.get("caption", "")
-                image_url = post.get("image_url")
+                post = data["posts"][0]
+                caption = post.get("caption", "")
+                image_url = post.get("image_url")
 
-                print(f"[SOCIAL CRON] Post ready for {user.get('email')} : {caption[:80]}...")
+                print(f"[SOCIAL CRON] Post ready for {user.get('email')} : {caption[:80]}...")
 
-                # TODO: brancher l'envoi mail ici
-                sent += 1
+                # TODO: brancher l'envoi mail ici
+                sent += 1
 
-        return {"success": True, "sent": sent}
+        return {"success": True, "sent": sent}
 
     except Exception as e:
-        print(f"[SOCIAL CRON] error: {e}")
-        return {"success": False, "message": str(e)}
+        print(f"[SOCIAL CRON] error: {e}")
+        return {"success": False, "message": str(e)}
