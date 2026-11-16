@@ -193,20 +193,21 @@ async def generate_posts(payload: GeneratePayload):
                 rules = """
 - Texte court et accrocheur : 3 à 5 lignes maximum.
 - 3 à 5 hashtags maximum, ciblés et pertinents, à la fin de la légende.
-- NE JAMAIS mettre d'URL dans le post. Écrire « Découvrez Clarity, lien en bio ».
-- Premier commentaire : une question naturelle pour encourager les échanges (facultatif mais recommandé)."""
+- NE JAMAIS mettre d'URL dans le post ni dans le premier commentaire.
+- Écrire exactement : « Découvrez Clarity, lien en bio. »
+- Premier commentaire : une question naturelle pour encourager les échanges."""
             elif platform == "facebook":
                 rules = """
 - Texte naturel et engageant : 3 à 6 lignes.
 - 0 à 2 hashtags maximum.
-- Lien directement à la fin de la publication.
-- Premier commentaire : facultatif, ne pas en ajouter d'artificiel."""
+- Lien du site cliquable à la fin de la publication.
+- Premier commentaire : une question naturelle (facultatif mais recommandé)."""
             elif platform == "linkedin":
                 rules = """
 - Texte professionnel : 6 à 10 lignes, aéré, orienté bénéfices concrets.
 - 0 à 3 hashtags maximum, pertinents.
-- Lien directement dans la publication.
-- Premier commentaire : facultatif, pour apporter une précision ou poser une vraie question."""
+- Lien du site cliquable à la fin de la publication, avant les hashtags.
+- Premier commentaire : une précision ou une vraie question (recommandé)."""
             else:
                 rules = "- Texte naturel. Hashtags limités. Lien si pertinent."
 
@@ -219,7 +220,7 @@ async def generate_posts(payload: GeneratePayload):
             if feedback_text:
                 feedback_block = f"\n\nRetours précédents de cet utilisateur (à respecter) :\n{feedback_text}"
 
-            website_info = f"\nSite web de l'utilisateur : {website}" if website else ""
+            website_info = f"\nSite web de l'utilisateur : {website}" if website else "\nPas de site web renseigné."
 
             prompt = f"""Tu es Clarity. Tu écris un post {platform} pour un indépendant / artisan.
 
@@ -239,7 +240,7 @@ Règles strictes pour {platform} :
 {feedback_block}
 
 Réponds uniquement en JSON :
-{{"caption": "légende adaptée au réseau avec 2-3 mots en gras Unicode", "first_comment": "commentaire naturel ou vide"}}"""
+{{"caption": "légende adaptée au réseau avec 2-3 mots en gras Unicode", "first_comment": "question ou précision naturelle (jamais vide)"}}"""
 
             try:
                 resp = await client.post(
