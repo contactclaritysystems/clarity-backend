@@ -27,7 +27,7 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Stockage des jobs en mémoire (simple pour la V1)
+# Stockage des jobs en mémoire
 JOBS = {}
 
 STYLES = [
