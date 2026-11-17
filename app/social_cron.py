@@ -18,14 +18,20 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABAS
 
 PARIS = ZoneInfo("Europe/Paris")
 
+# Le frontend (dashboard-67.html) enregistre les jours de la semaine en
+# anglais ("mon", "tue", "wed", "thu", "fri", "sat", "sun") dans
+# social_schedule_days. DAY_MAP utilisait auparavant des cles francaises
+# ("lun", "mar", ...), qui ne correspondaient donc JAMAIS aux cles reellement
+# enregistrees : aucune publication n'etait jamais detectee, quel que soit le
+# jour ou l'heure choisis. C'est la cause racine de l'absence totale de mail.
 DAY_MAP = {
-    0: "lun",
-    1: "mar",
-    2: "mer",
-    3: "jeu",
-    4: "ven",
-    5: "sam",
-    6: "dim"
+    0: "mon",
+    1: "tue",
+    2: "wed",
+    3: "thu",
+    4: "fri",
+    5: "sat",
+    6: "sun"
 }
 
 def send_email(to_email: str, subject: str, body: str, html: bool = False) -> str:
@@ -95,23 +101,32 @@ async def send_scheduled_posts():
         sent = 0
 
         for user in users:
-            days = user.get("social_schedule_days") or []
-            if isinstance(days, str):
+            # social_schedule_days est un objet { "lun": "07:00", "mar": "20:10", ... } :
+            # une heure PAR jour, pas une liste de jours + une heure globale
+            # separee. Le frontend n'ecrit jamais dans une colonne
+            # "social_schedule_time" (verifie dans dashboard-67.html) : lire
+            # cette colonne-la donnait toujours le defaut "07:00", quel que
+            # soit l'horaire choisi par l'utilisateur pour ce jour precis.
+            days_raw = user.get("social_schedule_days") or {}
+            if isinstance(days_raw, str):
                 try:
-                    days = json.loads(days)
-                except:
-                    days = []
-            schedule_time = user.get("social_schedule_time") or "07:00"
+                    days_raw = json.loads(days_raw)
+                except Exception:
+                    days_raw = {}
+            if not isinstance(days_raw, dict):
+                days_raw = {}
 
-            if current_day not in days:
-                continue
-            # Comparaison stricte "schedule_time != current_time" ratait toute
-            # heure programmee qui n'est pas un multiple exact de 5 minutes
-            # (le cron ne s'execute qu'a :00/:05/:10...) : un utilisateur regle
-            # sur 10h02 n'etait donc jamais detecte. On tolere desormais un
-            # ecart de quelques minutes autour de l'heure choisie.
+            schedule_time = days_raw.get(current_day)
+            if not schedule_time:
+                continue  # pas de programmation pour aujourd'hui
+
+            # Comparaison stricte ratait toute heure programmee qui n'est pas
+            # un multiple exact de 5 minutes (le cron ne s'execute qu'a
+            # :00/:05/:10...) : un utilisateur regle sur 10h02 n'etait donc
+            # jamais detecte. On tolere desormais un ecart de quelques
+            # minutes autour de l'heure choisie.
             try:
-                sched_h, sched_m = map(int, schedule_time.split(":"))
+                sched_h, sched_m = map(int, str(schedule_time).split(":"))
                 sched_minutes = sched_h * 60 + sched_m
                 now_minutes = now.hour * 60 + now.minute
                 diff = abs(now_minutes - sched_minutes)
