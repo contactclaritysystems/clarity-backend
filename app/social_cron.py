@@ -127,8 +127,14 @@ async def send_scheduled_posts():
                 continue
 
             async with httpx.AsyncClient() as client:
+                # En production (Render), l'app écoute sur le port fourni par
+                # $PORT, pas sur 8000 : l'appel interne codé en dur sur
+                # localhost:8000 échouait silencieusement (connexion refusée)
+                # à chaque exécution du cron, donc aucune génération ne
+                # démarrait jamais et aucun mail ne partait.
+                internal_port = os.getenv("PORT", "8000")
                 start = await client.post(
-                    "http://localhost:8000/social/generate",
+                    f"http://localhost:{internal_port}/social/generate",
                     json={
                         "user_id": user["id"],
                         "theme": "Conseil / astuce utile",
@@ -158,7 +164,7 @@ async def send_scheduled_posts():
                 for _ in range(40):  # ~40 x 2s = ~80s max d'attente
                     await asyncio.sleep(2)
                     status_resp = await client.get(
-                        "http://localhost:8000/social/generate/status",
+                        f"http://localhost:{internal_port}/social/generate/status",
                         params={"job_id": job_id},
                         timeout=20
                     )
