@@ -4,6 +4,7 @@ import random
 import base64
 import asyncio
 import uuid
+import re
 from io import BytesIO
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks
@@ -29,41 +30,64 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 JOBS = {}
 
-STYLES = [
-    "photo professionnelle moderne, lumière naturelle, fond épuré",
-    "style photo lifestyle, ambiance chaleureuse, lumière douce",
-    "photo corporate élégante, fond clair, composition aérée",
-    "style minimaliste, couleurs neutres, lumière du jour",
-    "photo dynamique, angle légèrement bas, ambiance positive",
-    "style contemporain, fond doux, mise en scène simple",
-]
+SYSTEM_PROMPT = """Tu es l'assistant de rédaction de Clarity. Tu crées des publications « image + texte » pour Instagram, Facebook et LinkedIn, pour des artisans, des TPE et des indépendants français.
+Ton objectif : un maximum de vraies interactions (commentaires, partages, enregistrements), pas des likes vides.
 
-THEMES = [
-    "Faire tester le produit / service",
-    "Gagner des abonnés",
-    "Avoir plus de commentaires",
-    "Obtenir des messages privés",
-    "Annoncer une nouveauté",
-    "Montrer un résultat client",
-    "Conseil / astuce utile",
-    "Coulisses / quotidien",
-    "Offre limitée / promo",
-    "Autre (précisez)"
-]
+INTERDICTIONS ABSOLUES :
+1. Ne jamais inventer de clients, témoignages, avis, chiffres ou résultats. Décris une situation concrète à la place.
+2. Texte brut uniquement. Aucun markdown : pas de **, #, _ ni >. Pour mettre en valeur, utilise un retour à la ligne ou un emoji.
+3. Mots interdits : Imaginez, Saviez-vous, Vous êtes débordé, ce qui compte vraiment, gagnez un temps précieux, dites adieu, ne laissez plus, libérez-vous, n'est pas juste une application, au quotidien, en toute sérénité, révolutionner, booster, Bonjour à tous.
+4. Les 3 versions ne doivent jamais partager la même phrase.
+5. Format de sortie obligatoire : brief image, texte, 1er commentaire pour chaque réseau.
 
-class GeneratePayload(BaseModel):
-    user_id: str
-    theme: Optional[str] = ""
-    theme_other: Optional[str] = ""
-    platforms: List[str] = ["instagram"]
-    with_emojis: Optional[bool] = True
-    logo_url: Optional[str] = None
+TON :
+- Instagram et Facebook : tutoiement.
+- LinkedIn : vouvoiement ou « je ».
+- Concret, mots simples, détails de terrain.
 
-class FeedbackPayload(BaseModel):
-    user_id: str
-    theme: Optional[str] = ""
-    liked: bool
-    comment: Optional[str] = ""
+ACCROCHE (1re ligne) :
+- 125 caractères max, parle du problème du lecteur, jamais du produit.
+- Types : situation vécue, chiffre précis, contre-intuitif, question ciblée, avant/après, erreur fréquente.
+- Interdit en ouverture : Bonjour à tous, Aujourd'hui je voulais, Saviez-vous que, emoji seul.
+
+CORPS :
+- Phrases courtes, une idée par ligne, lignes vides entre blocs.
+- Structure : problème → ce qui change → preuve.
+- 0 à 3 emojis max.
+- Fin : UNE seule action (question, partage, enregistrement, essai via mot-clé).
+
+1ER COMMENTAIRE :
+- Complément utile absent du post + question différente.
+- 1 à 3 phrases, même ton.
+- Jamais de lien.
+
+FORMAT DE SORTIE (JSON uniquement) :
+{
+  "instagram": {
+    "brief": "description précise de l'image",
+    "caption": "texte avec sauts de ligne",
+    "first_comment": "complément + question"
+  },
+  "facebook": {
+    "brief": "...",
+    "caption": "...",
+    "first_comment": "..."
+  },
+  "linkedin": {
+    "brief": "...",
+    "caption": "...",
+    "first_comment": "..."
+  }
+}
+
+Réponds uniquement avec le JSON, rien d'autre."""
+
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r'\*\*|__', '', text)
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+    return text.strip()
 
 def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
@@ -96,8 +120,9 @@ def get_recent_feedback(user_id: str) -> str:
         print(f"[SOCIAL] feedback read: {e}")
         return ""
 
-async def generate_single_image(client: httpx.AsyncClient, prompt: str, logo_url: str = None) -> str:
+async def generate_image(client: httpx.AsyncClient, brief: str, logo_url: str = None) -> str:
     try:
+        prompt = f"Photo réaliste, style smartphone, pas de banque d'images, pas de personne en costume au bureau. {brief}. Format vertical 4:5. Pas de texte dans l'image sauf si explicitement demandé."
         img = await client.post(
             "https://api.openai.com/v1/images/generations",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -132,75 +157,36 @@ async def generate_single_image(client: httpx.AsyncClient, prompt: str, logo_url
 
         return "data:image/png;base64," + base64.b64encode(img_bytes).decode()
     except Exception as e:
-        print(f"[SOCIAL] generate_single_image: {e}")
+        print(f"[SOCIAL] generate_image: {e}")
         return None
 
-async def generate_text_for_platform(client: httpx.AsyncClient, platform: str, context: str, theme: str, with_emojis: bool, feedback_text: str, website: str) -> dict:
-    if platform == "instagram":
-        rules = """
-- Accroche ≤125 caractères, parle du problème du lecteur.
-- Texte : 80 à 150 mots.
-- 3 à 5 hashtags précis à la fin.
-- Jamais d'URL. Terminer par « Lien en bio ».
-- 1er commentaire : complément utile + question différente, SANS lien."""
-    elif platform == "facebook":
-        rules = """
-- Accroche ≤125 caractères.
-- Texte : 60 à 120 mots, ton conversation.
-- 0 à 2 hashtags.
-- Lien uniquement dans un 2e commentaire (pas dans le post ni le 1er).
-- 1er commentaire : complément + question, SANS lien."""
-    elif platform == "linkedin":
-        rules = """
-- 2 premières lignes d'accroche fortes.
-- Texte : 150 à 250 mots, aéré, professionnel.
-- 0 à 3 hashtags.
-- Pas de lien dans le post ni le 1er commentaire (envoi en privé de préférence).
-- 1er commentaire : complément + question, SANS lien."""
-    else:
-        rules = "- Texte naturel. Pas de lien dans le post."
-
-    emoji_rule = "0 à 3 emojis maximum, seulement utiles." if with_emojis else "Aucun emoji."
-    feedback_block = f"\n\nRetours précédents (à respecter) :\n{feedback_text}" if feedback_text else ""
+async def generate_posts(client: httpx.AsyncClient, context: str, theme: str, with_emojis: bool, feedback_text: str, website: str) -> dict:
+    emoji_rule = "0 à 3 emojis maximum." if with_emojis else "Aucun emoji."
+    feedback_block = f"\n\nRetours précédents à respecter :\n{feedback_text}" if feedback_text else ""
     website_info = f"\nSite : {website}" if website else ""
 
-    prompt = f"""Tu es l'assistant de rédaction de Clarity. Tu crées des publications image + texte pour artisans, TPE et indépendants français.
-
-Objectif : vraies interactions (commentaires, partages, enregistrements), pas des likes vides.
-
-Règles des algorithmes à appliquer :
-- Accroche dans les 125 premiers caractères.
-- Pas de lien externe dans le texte.
-- Pas d'appels à l'engagement forcés.
-- Texte naturel, pas générique.
-- Utilise de vrais sauts de ligne entre les paragraphes.
-
-{rules}
-- {emoji_rule}
-- 2-3 mots en gras Unicode dans la légende.
-- Ne jamais inventer de résultats ou de fonctionnalités.
-- Structure : problème → ce qui change → preuve.
-- Varie les angles, les personnages et les idées par rapport aux générations précédentes.
+    user_msg = f"""Contexte activité : {context}
+Thème : {theme or "aucun"}
+{emoji_rule}
 {website_info}
 {feedback_block}
 
-Contexte activité : {context}
-Thème : {theme or "aucun"}
-
-Réponds uniquement en JSON :
-{{"caption": "texte avec vrais sauts de ligne \\n entre les paragraphes", "first_comment": "complément + question sans lien (toujours remplir)", "image_brief": "description précise"}}"""
+Génère les 3 versions (Instagram, Facebook, LinkedIn)."""
 
     try:
         resp = await client.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
             json={
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.4,
-                "max_tokens": 600
+                "model": "gpt-4o",
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg}
+                ],
+                "temperature": 0.75,
+                "max_tokens": 2000
             },
-            timeout=25
+            timeout=40
         )
         resp.raise_for_status()
         raw = resp.json()["choices"][0]["message"]["content"].strip()
@@ -209,23 +195,19 @@ Réponds uniquement en JSON :
             if raw.startswith("json"):
                 raw = raw[4:]
         data = json.loads(raw.strip())
-        return {
-            "platform": platform,
-            "caption": data.get("caption", "").replace("\\n", "\n"),
-            "first_comment": data.get("first_comment") or "Petit bonus : pense à répondre à tous les commentaires dans la première heure. Et toi, quelle tâche te prend le plus de temps le soir ?",
-            "image_brief": data.get("image_brief", "")
-        }
+        
+        # Nettoyage markdown
+        for platform in data:
+            if isinstance(data[platform], dict):
+                data[platform]["caption"] = clean_text(data[platform].get("caption", ""))
+                data[platform]["first_comment"] = clean_text(data[platform].get("first_comment", ""))
+        
+        return data
     except Exception as e:
-        print(f"[SOCIAL] text {platform}: {e}")
-        return {
-            "platform": platform,
-            "caption": "Impossible de générer.",
-            "first_comment": "",
-            "image_brief": ""
-        }
+        print(f"[SOCIAL] generate_posts: {e}")
+        return {}
 
 async def progress_ticker(job_id: str, start: int, end: int, duration: float):
-    """Fait monter le pourcentage de start à end sur duration secondes."""
     steps = end - start
     if steps <= 0 or duration <= 0:
         return
@@ -236,8 +218,7 @@ async def progress_ticker(job_id: str, start: int, end: int, duration: float):
         JOBS[job_id]["progress"] = start + i + 1
         await asyncio.sleep(delay)
 
-async def run_generation(job_id: str, payload: GeneratePayload):
-    """Génération avec progression fluide sans blocage."""
+async def run_generation(job_id: str, payload):
     JOBS[job_id] = {"status": "starting", "progress": 0, "result": None, "error": None}
     
     try:
@@ -249,15 +230,13 @@ async def run_generation(job_id: str, payload: GeneratePayload):
         with_emojis = payload.with_emojis if payload.with_emojis is not None else True
 
         context = "activité non précisée"
-        length = "moyen"
         logo_url = payload.logo_url
         website = ""
         if supabase:
             try:
-                res = supabase.table("profiles").select("social_context, social_length, social_logo_url, website").eq("id", user_id).single().execute()
+                res = supabase.table("profiles").select("social_context, social_logo_url, website").eq("id", user_id).single().execute()
                 if res.data:
                     context = res.data.get("social_context") or context
-                    length = res.data.get("social_length") or length
                     logo_url = logo_url or res.data.get("social_logo_url")
                     website = (res.data.get("website") or "").strip()
             except Exception as e:
@@ -266,66 +245,64 @@ async def run_generation(job_id: str, payload: GeneratePayload):
         feedback_text = get_recent_feedback(user_id)
 
         async with httpx.AsyncClient() as client:
-            # Phase 1 : rédaction (0 → 25 %)
+            # Phase 1 : rédaction
             JOBS[job_id]["status"] = "writing_text"
-            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 25, 6))
+            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 30, 8))
             
-            text_tasks = [
-                generate_text_for_platform(client, p, context, theme, with_emojis, feedback_text, website)
-                for p in platforms
-            ]
-            text_results = await asyncio.gather(*text_tasks, return_exceptions=True)
+            posts_data = await generate_posts(client, context, theme, with_emojis, feedback_text, website)
             ticker1.cancel()
 
-            # Phase 2 : 1er commentaire (25 → 32 %)
-            JOBS[job_id]["status"] = "writing_comment"
-            JOBS[job_id]["progress"] = 25
-            ticker2 = asyncio.create_task(progress_ticker(job_id, 25, 32, 1.5))
-            await asyncio.sleep(1)
+            # Phase 2 : images
+            JOBS[job_id]["status"] = "generating_image"
+            JOBS[job_id]["progress"] = 30
+            ticker2 = asyncio.create_task(progress_ticker(job_id, 30, 95, 20))
+            
+            posts = []
+            for platform in platforms:
+                p_data = posts_data.get(platform, {})
+                brief = p_data.get("brief", "artisan au travail, style réaliste")
+                image_url = await generate_image(client, brief, logo_url)
+                
+                posts.append({
+                    "platform": platform,
+                    "caption": p_data.get("caption", ""),
+                    "first_comment": p_data.get("first_comment", ""),
+                    "image_brief": brief,
+                    "image_url": image_url,
+                    "image_urls": [image_url] if image_url else []
+                })
+            
             ticker2.cancel()
 
-            # Phase 3 : image (32 → 99 %) — monte jusqu’à 99, pas de blocage
-            JOBS[job_id]["status"] = "generating_image"
-            JOBS[job_id]["progress"] = 32
-            ticker3 = asyncio.create_task(progress_ticker(job_id, 32, 99, 30))
-            
-            style = random.choice(STYLES)
-            base_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Format vertical 4:5."
-
-            image_url = await generate_single_image(client, base_prompt, logo_url)
-            ticker3.cancel()
-
-            # Dès que l'image est prête → 100 % direct
-            JOBS[job_id]["status"] = "done"
-            JOBS[job_id]["progress"] = 100
-
-            # Résultat
-            posts = []
-            for text in text_results:
-                if isinstance(text, dict):
-                    text["image_url"] = image_url
-                    text["image_urls"] = [image_url] if image_url else []
-                    posts.append(text)
-                else:
-                    posts.append({
-                        "platform": "unknown",
-                        "caption": "Erreur de génération.",
-                        "first_comment": "",
-                        "image_brief": "",
-                        "image_url": image_url,
-                        "image_urls": [image_url] if image_url else []
-                    })
-
-            JOBS[job_id]["result"] = {
-                "success": True,
-                "posts": posts,
-                "image_urls": [image_url] if image_url else [],
-                "carousel": False
+            JOBS[job_id] = {
+                "status": "done",
+                "progress": 100,
+                "result": {
+                    "success": True,
+                    "posts": posts,
+                    "image_urls": [p["image_url"] for p in posts if p.get("image_url")],
+                    "carousel": False
+                },
+                "error": None
             }
 
     except Exception as e:
         print(f"[SOCIAL] job {job_id} error: {e}")
         JOBS[job_id] = {"status": "error", "progress": 0, "result": None, "error": str(e)}
+
+class GeneratePayload(BaseModel):
+    user_id: str
+    theme: Optional[str] = ""
+    theme_other: Optional[str] = ""
+    platforms: List[str] = ["instagram"]
+    with_emojis: Optional[bool] = True
+    logo_url: Optional[str] = None
+
+class FeedbackPayload(BaseModel):
+    user_id: str
+    theme: Optional[str] = ""
+    liked: bool
+    comment: Optional[str] = ""
 
 @router.post("/social/generate")
 async def start_generate(payload: GeneratePayload, background_tasks: BackgroundTasks):
@@ -334,9 +311,7 @@ async def start_generate(payload: GeneratePayload, background_tasks: BackgroundT
     
     job_id = str(uuid.uuid4())
     JOBS[job_id] = {"status": "starting", "progress": 0, "result": None, "error": None}
-    
     background_tasks.add_task(run_generation, job_id, payload)
-    
     return {"success": True, "job_id": job_id}
 
 @router.get("/social/generate/status")
@@ -344,7 +319,6 @@ async def get_status(job_id: str):
     job = JOBS.get(job_id)
     if not job:
         return {"success": False, "message": "Job introuvable"}
-    
     return {
         "success": True,
         "status": job["status"],
@@ -357,18 +331,12 @@ async def get_status(job_id: str):
 async def get_social_advice():
     if not supabase:
         return {"success": False, "advice": "Conseils non disponibles.", "updated_at": None}
-
     try:
         res = supabase.table("social_advice").select("content, updated_at").eq("id", 1).single().execute()
         if res.data:
-            return {
-                "success": True,
-                "advice": res.data.get("content") or "",
-                "updated_at": res.data.get("updated_at")
-            }
+            return {"success": True, "advice": res.data.get("content") or "", "updated_at": res.data.get("updated_at")}
     except Exception as e:
         print(f"[SOCIAL] advice: {e}")
-
     return {"success": False, "advice": "Conseils non disponibles.", "updated_at": None}
 
 @router.post("/social/feedback")
