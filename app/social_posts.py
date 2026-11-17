@@ -90,7 +90,9 @@ Choisis selon le thème :
 - LinkedIn : 0 à 3. Facebook : 0 à 2.
 
 === 1ER COMMENTAIRE ===
-- Un bonus utile absent du post (astuce, exemple concret, réponse à une objection) + une question différente de celle du post.
+- Un bonus utile absent du post (astuce, exemple concret, réponse à une objection), puis une mention courte et naturelle de Clarity (l'outil qui a aidé à préparer ce post), puis une question différente de celle du post.
+- La question doit être la DERNIÈRE phrase du commentaire, sans exception, sur les 3 réseaux (Instagram, Facebook, LinkedIn).
+- La mention de Clarity doit rester discrète et naturelle, jamais publicitaire : une incise courte (« avec Clarity », « c'est Clarity qui me l'a rappelé », « Clarity m'a aidé à préparer ce post »), jamais une phrase qui vante le produit ou invente un résultat.
 - 1 à 3 phrases, même ton que le post. Jamais de lien. Ne commence pas par « Saviez-vous », « Petit secret », « Astuce : commencez par ».
 
 === BRIEF IMAGE (UNE seule image par réseau, pas de carrousel) ===
@@ -118,7 +120,7 @@ Si tu coches 2 cases sur 3, il vaut mieux le voir avant la douche froide.
 Écris DEVIS en message privé, je passe jeter un œil.
 
 #plombier #martigues #chauffeeau #plomberie #bouchesdurhone
-first_comment : Bonus : en zone d'eau calcaire comme chez nous, un détartrage tous les 2 à 3 ans évite la plupart des pannes. Le tien a quel âge à ton avis ?
+first_comment : Bonus : en zone d'eau calcaire comme chez nous, un détartrage tous les 2 à 3 ans évite la plupart des pannes. C'est Clarity qui m'a aidé à préparer ce post aujourd'hui. Le tien a quel âge à ton avis ?
 
 Exemple 2 : LinkedIn pour un assistant vocal destiné aux artisans (contexte : le fondateur est un ancien chaudronnier, cherche des testeurs)
 brief : Un artisan en tenue de travail assis côté conducteur dans son utilitaire, le soir, le téléphone posé sur le volant, l'écran éclaire son visage fatigué. Photo smartphone, ambiance réelle.
@@ -137,13 +139,14 @@ Alors j'ai construit l'outil que j'aurais voulu avoir : je parle, il écrit le m
 Je cherche quelques artisans pour le tester et me dire franchement ce qui ne va pas.
 
 Commentez ESSAI, je vous envoie l'accès en message privé.
-first_comment : La question que je me pose : après le chantier, qu'est-ce qui vous prend le plus de temps ? Les devis, les relances ou les rendez-vous ?
+first_comment : Avec Clarity, c'est exactement ce temps-là que je récupère chaque soir. La question que je me pose : après le chantier, qu'est-ce qui vous prend le plus de temps ? Les devis, les relances ou les rendez-vous ?
 
 === AVANT DE RÉPONDRE, VÉRIFIE CHAQUE VERSION ===
 - Zéro client, témoignage ou chiffre inventé ? Zéro fonctionnalité inventée ?
 - Zéro markdown ? Zéro mot ou tournure de la liste interdite ?
 - L'accroche fait moins de 125 caractères, est une scène concrète et diffère des autres versions ?
 - Une seule action à la fin ? Zéro lien ?
+- Le 1er commentaire mentionne Clarity de façon discrète et se termine bien par une question ?
 - Le brief décrit une seule image, sans téléphone en appel ni fausse interface ?
 Si une réponse est non, corrige avant de répondre.
 
@@ -153,7 +156,7 @@ Réponds uniquement avec un objet JSON, sans texte autour. Une clé par réseau 
   "instagram": {
     "brief": "description de l'image",
     "caption": "texte du post avec \\n pour les sauts de ligne, hashtags compris",
-    "first_comment": "bonus + question"
+    "first_comment": "bonus + mention Clarity + question"
   }
 }"""
 
