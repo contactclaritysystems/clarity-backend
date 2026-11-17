@@ -266,9 +266,9 @@ async def run_generation(job_id: str, payload: GeneratePayload):
         feedback_text = get_recent_feedback(user_id)
 
         async with httpx.AsyncClient() as client:
-            # Phase 1 : rédaction (0 → 35 %)
+            # Phase 1 : rédaction (0 → 30 %)
             JOBS[job_id]["status"] = "writing_text"
-            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 35, 8))
+            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 30, 7))
             
             text_tasks = [
                 generate_text_for_platform(client, p, context, theme, with_emojis, feedback_text, website)
@@ -277,17 +277,17 @@ async def run_generation(job_id: str, payload: GeneratePayload):
             text_results = await asyncio.gather(*text_tasks, return_exceptions=True)
             ticker1.cancel()
 
-            # Phase 2 : 1er commentaire (35 → 45 %)
+            # Phase 2 : 1er commentaire (30 → 38 %)
             JOBS[job_id]["status"] = "writing_comment"
-            JOBS[job_id]["progress"] = 35
-            ticker2 = asyncio.create_task(progress_ticker(job_id, 35, 45, 2))
-            await asyncio.sleep(1.5)
+            JOBS[job_id]["progress"] = 30
+            ticker2 = asyncio.create_task(progress_ticker(job_id, 30, 38, 2))
+            await asyncio.sleep(1.2)
             ticker2.cancel()
 
-            # Phase 3 : image (45 → 90 %)
+            # Phase 3 : image (38 → 95 %) — long, donc large plage
             JOBS[job_id]["status"] = "generating_image"
-            JOBS[job_id]["progress"] = 45
-            ticker3 = asyncio.create_task(progress_ticker(job_id, 45, 90, 18))
+            JOBS[job_id]["progress"] = 38
+            ticker3 = asyncio.create_task(progress_ticker(job_id, 38, 95, 25))
             
             style = random.choice(STYLES)
             base_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Format vertical 4:5."
@@ -295,10 +295,10 @@ async def run_generation(job_id: str, payload: GeneratePayload):
             image_url = await generate_single_image(client, base_prompt, logo_url)
             ticker3.cancel()
 
-            # Phase 4 : finalisation (90 → 100 %)
+            # Phase 4 : finalisation (95 → 100 %)
             JOBS[job_id]["status"] = "finalizing"
-            JOBS[job_id]["progress"] = 90
-            ticker4 = asyncio.create_task(progress_ticker(job_id, 90, 100, 2))
+            JOBS[job_id]["progress"] = 95
+            ticker4 = asyncio.create_task(progress_ticker(job_id, 95, 100, 1.5))
             await asyncio.sleep(1)
             ticker4.cancel()
 
