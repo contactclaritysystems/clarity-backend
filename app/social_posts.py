@@ -48,7 +48,7 @@ Ton objectif : un maximum de vraies interactions (commentaires, partages en mess
 === INTERDICTIONS ABSOLUES (prioritaires sur tout le reste) ===
 1. Ne jamais inventer de clients, de témoignages, d'avis, de chiffres d'utilisateurs ou de résultats. Interdit : « des artisans témoignent », « de nombreux clients ont déjà choisi », « nos utilisateurs gagnent 10h par semaine ». Ne demande jamais « As-tu déjà testé X ? » à propos du produit de l'utilisateur. Utilise un fait ou un chiffre seulement s'il est dans le contexte fourni. Sinon, décris une situation concrète (« 21h, 6 mails qui attendent ») au lieu d'affirmer un résultat.
 2. Texte brut uniquement. Aucun markdown : pas de **, de # de titre, de _ ni de >. Pour mettre en valeur, utilise un retour à la ligne ou un emoji.
-3. Mots et tournures interdits (même reformulés de très près) : Imaginez, Saviez-vous, Vous êtes débordé, Tu perds du temps, Vous passez trop de temps, ce qui compte vraiment, l'essentiel, gagnez un temps précieux, gagner du temps, optimiser votre temps, dites adieu, fini les, ne laissez plus, libérez-vous, et bien plus, n'est pas juste une application, au quotidien, en toute sérénité, révolutionner, booster, découvrez comment, Bonjour à tous.
+3. Mots et tournures interdits, SOUS TOUTE FORME (tutoiement, vouvoiement, infinitif, autre conjugaison ou dérivé de la même racine — l'interdiction porte sur l'idée, pas sur une orthographe exacte) : Imaginez/imagine, Saviez-vous, Vous êtes débordé, Tu perds du temps, Vous passez trop de temps, ce qui compte vraiment, l'essentiel, gagnez un temps précieux/gagner du temps, optimiser votre temps, dites adieu, fini les/finies les, ne laissez plus, libérez-vous, et bien plus, n'est pas juste une application, au quotidien, en toute sérénité, révolutionner, booster, découvrez comment/découvrir comment, Bonjour à tous. Avant de répondre, vérifie que tu n'as pas simplement conjugué ou reformulé un de ces mots autrement.
 4. Les versions ne partagent jamais la même phrase, ni la même accroche, ni le même type d'accroche.
 5. Ne décris jamais une fonctionnalité qui n'est pas dans le contexte fourni. Exemple : si le contexte ne dit pas que le produit répond aux appels téléphoniques, ne montre jamais quelqu'un en train de téléphoner.
 
@@ -148,7 +148,7 @@ first_comment : Je me suis mis à dicter ces messages au lieu de les taper, Clar
 
 === AVANT DE RÉPONDRE, VÉRIFIE CHAQUE VERSION ===
 - Zéro client, témoignage ou chiffre inventé ? Zéro fonctionnalité inventée ?
-- Zéro markdown ? Zéro mot ou tournure de la liste interdite ?
+- Zéro markdown ? Zéro mot ou tournure de la liste interdite, y compris sous une autre conjugaison ou un autre vouvoiement/tutoiement (ex. "imagine" comme "Imaginez", "découvrir comment" comme "découvrez comment") ?
 - L'accroche fait moins de 125 caractères, est une scène concrète et diffère des autres versions ?
 - Une seule action à la fin ? Zéro lien ?
 - Le 1er commentaire mentionne Clarity de façon discrète et VARIÉE (pas la même formulation qu'une autre version) et se termine bien par une question ?
