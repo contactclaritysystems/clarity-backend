@@ -27,7 +27,6 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Stockage des jobs en mémoire
 JOBS = {}
 
 STYLES = [
@@ -59,7 +58,6 @@ class GeneratePayload(BaseModel):
     platforms: List[str] = ["instagram"]
     with_emojis: Optional[bool] = True
     logo_url: Optional[str] = None
-    carousel: Optional[bool] = False
 
 class FeedbackPayload(BaseModel):
     user_id: str
@@ -227,8 +225,8 @@ Réponds uniquement en JSON :
         }
 
 async def run_generation(job_id: str, payload: GeneratePayload):
-    """Génération en arrière-plan avec mise à jour du statut."""
-    JOBS[job_id] = {"status": "writing_text", "progress": 10, "result": None, "error": None}
+    """Génération en arrière-plan avec progression fluide."""
+    JOBS[job_id] = {"status": "starting", "progress": 5, "result": None, "error": None}
     
     try:
         user_id = payload.user_id
@@ -237,7 +235,6 @@ async def run_generation(job_id: str, payload: GeneratePayload):
             theme = (payload.theme_other or "").strip()
         platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
         with_emojis = payload.with_emojis if payload.with_emojis is not None else True
-        use_carousel = payload.carousel or False
 
         context = "activité non précisée"
         length = "moyen"
@@ -257,9 +254,9 @@ async def run_generation(job_id: str, payload: GeneratePayload):
         feedback_text = get_recent_feedback(user_id)
 
         async with httpx.AsyncClient() as client:
-            # Textes
+            # Étape 1 : rédaction du texte
             JOBS[job_id]["status"] = "writing_text"
-            JOBS[job_id]["progress"] = 20
+            JOBS[job_id]["progress"] = 15
             
             text_tasks = [
                 generate_text_for_platform(client, p, context, theme, with_emojis, feedback_text, website)
@@ -267,32 +264,33 @@ async def run_generation(job_id: str, payload: GeneratePayload):
             ]
             text_results = await asyncio.gather(*text_tasks, return_exceptions=True)
 
-            # Image
+            # Étape 2 : 1er commentaire
+            JOBS[job_id]["status"] = "writing_comment"
+            JOBS[job_id]["progress"] = 40
+
+            # Petite pause pour que le front affiche bien l'étape
+            await asyncio.sleep(0.8)
+
+            # Étape 3 : création de l'image
             JOBS[job_id]["status"] = "generating_image"
-            JOBS[job_id]["progress"] = 50
+            JOBS[job_id]["progress"] = 55
             
             style = random.choice(STYLES)
             base_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Format vertical 4:5."
 
-            if use_carousel:
-                prompts = [
-                    base_prompt + " Vue principale du sujet, cadrage large.",
-                    base_prompt + " Détail ou angle différent, focus sur une action ou un résultat.",
-                    base_prompt + " Scène complémentaire, avant/après ou contexte d'utilisation."
-                ]
-                img_tasks = [generate_single_image(client, p, logo_url) for p in prompts]
-            else:
-                img_tasks = [generate_single_image(client, base_prompt, logo_url)]
+            image_url = await generate_single_image(client, base_prompt, logo_url)
 
-            image_results = await asyncio.gather(*img_tasks, return_exceptions=True)
-            image_urls = [r for r in image_results if isinstance(r, str)]
+            # Étape 4 : finalisation
+            JOBS[job_id]["status"] = "finalizing"
+            JOBS[job_id]["progress"] = 85
+            await asyncio.sleep(0.5)
 
             # Résultat final
             posts = []
             for text in text_results:
                 if isinstance(text, dict):
-                    text["image_url"] = image_urls[0] if image_urls else None
-                    text["image_urls"] = image_urls
+                    text["image_url"] = image_url
+                    text["image_urls"] = [image_url] if image_url else []
                     posts.append(text)
                 else:
                     posts.append({
@@ -300,8 +298,8 @@ async def run_generation(job_id: str, payload: GeneratePayload):
                         "caption": "Erreur de génération.",
                         "first_comment": "",
                         "image_brief": "",
-                        "image_url": image_urls[0] if image_urls else None,
-                        "image_urls": image_urls
+                        "image_url": image_url,
+                        "image_urls": [image_url] if image_url else []
                     })
 
             JOBS[job_id] = {
@@ -310,8 +308,8 @@ async def run_generation(job_id: str, payload: GeneratePayload):
                 "result": {
                     "success": True,
                     "posts": posts,
-                    "image_urls": image_urls,
-                    "carousel": use_carousel
+                    "image_urls": [image_url] if image_url else [],
+                    "carousel": False
                 },
                 "error": None
             }
