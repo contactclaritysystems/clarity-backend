@@ -105,7 +105,20 @@ async def send_scheduled_posts():
 
             if current_day not in days:
                 continue
-            if schedule_time != current_time:
+            # Comparaison stricte "schedule_time != current_time" ratait toute
+            # heure programmee qui n'est pas un multiple exact de 5 minutes
+            # (le cron ne s'execute qu'a :00/:05/:10...) : un utilisateur regle
+            # sur 10h02 n'etait donc jamais detecte. On tolere desormais un
+            # ecart de quelques minutes autour de l'heure choisie.
+            try:
+                sched_h, sched_m = map(int, schedule_time.split(":"))
+                sched_minutes = sched_h * 60 + sched_m
+                now_minutes = now.hour * 60 + now.minute
+                diff = abs(now_minutes - sched_minutes)
+                diff = min(diff, 1440 - diff)  # gere le passage minuit
+            except Exception:
+                diff = 9999
+            if diff > 2:
                 continue
 
             email = user.get("email")
