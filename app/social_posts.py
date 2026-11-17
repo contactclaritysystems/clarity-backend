@@ -3,8 +3,10 @@ import json
 import random
 import base64
 import asyncio
+import uuid
 from io import BytesIO
-from fastapi import APIRouter, UploadFile, File, Form
+from datetime import datetime
+from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
 from supabase import create_client
@@ -24,6 +26,9 @@ if SUPABASE_URL and SUPABASE_KEY:
         supabase = None
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Stockage des jobs en mémoire (simple pour la V1)
+JOBS = {}
 
 STYLES = [
     "photo professionnelle moderne, lumière naturelle, fond épuré",
@@ -64,14 +69,11 @@ class FeedbackPayload(BaseModel):
 
 def overlay_logo(base_img: Image.Image, logo_bytes: bytes) -> Image.Image:
     logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
-    
     max_w = int(base_img.width * 0.26)
     ratio = max_w / logo.width
     logo = logo.resize((max_w, int(logo.height * ratio)), Image.LANCZOS)
-    
     margin = int(base_img.width * 0.03)
     pos = (base_img.width - logo.width - margin, margin)
-    
     base_img = base_img.convert("RGBA")
     base_img.paste(logo, pos, logo)
     return base_img
@@ -224,6 +226,126 @@ Réponds uniquement en JSON :
             "image_brief": ""
         }
 
+async def run_generation(job_id: str, payload: GeneratePayload):
+    """Génération en arrière-plan avec mise à jour du statut."""
+    JOBS[job_id] = {"status": "writing_text", "progress": 10, "result": None, "error": None}
+    
+    try:
+        user_id = payload.user_id
+        theme = (payload.theme or "").strip()
+        if theme == "Autre (précisez)":
+            theme = (payload.theme_other or "").strip()
+        platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
+        with_emojis = payload.with_emojis if payload.with_emojis is not None else True
+        use_carousel = payload.carousel or False
+
+        context = "activité non précisée"
+        length = "moyen"
+        logo_url = payload.logo_url
+        website = ""
+        if supabase:
+            try:
+                res = supabase.table("profiles").select("social_context, social_length, social_logo_url, website").eq("id", user_id).single().execute()
+                if res.data:
+                    context = res.data.get("social_context") or context
+                    length = res.data.get("social_length") or length
+                    logo_url = logo_url or res.data.get("social_logo_url")
+                    website = (res.data.get("website") or "").strip()
+            except Exception as e:
+                print(f"[SOCIAL] profile: {e}")
+
+        feedback_text = get_recent_feedback(user_id)
+
+        async with httpx.AsyncClient() as client:
+            # Textes
+            JOBS[job_id]["status"] = "writing_text"
+            JOBS[job_id]["progress"] = 20
+            
+            text_tasks = [
+                generate_text_for_platform(client, p, context, theme, with_emojis, feedback_text, website)
+                for p in platforms
+            ]
+            text_results = await asyncio.gather(*text_tasks, return_exceptions=True)
+
+            # Image
+            JOBS[job_id]["status"] = "generating_image"
+            JOBS[job_id]["progress"] = 50
+            
+            style = random.choice(STYLES)
+            base_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Format vertical 4:5."
+
+            if use_carousel:
+                prompts = [
+                    base_prompt + " Vue principale du sujet, cadrage large.",
+                    base_prompt + " Détail ou angle différent, focus sur une action ou un résultat.",
+                    base_prompt + " Scène complémentaire, avant/après ou contexte d'utilisation."
+                ]
+                img_tasks = [generate_single_image(client, p, logo_url) for p in prompts]
+            else:
+                img_tasks = [generate_single_image(client, base_prompt, logo_url)]
+
+            image_results = await asyncio.gather(*img_tasks, return_exceptions=True)
+            image_urls = [r for r in image_results if isinstance(r, str)]
+
+            # Résultat final
+            posts = []
+            for text in text_results:
+                if isinstance(text, dict):
+                    text["image_url"] = image_urls[0] if image_urls else None
+                    text["image_urls"] = image_urls
+                    posts.append(text)
+                else:
+                    posts.append({
+                        "platform": "unknown",
+                        "caption": "Erreur de génération.",
+                        "first_comment": "",
+                        "image_brief": "",
+                        "image_url": image_urls[0] if image_urls else None,
+                        "image_urls": image_urls
+                    })
+
+            JOBS[job_id] = {
+                "status": "done",
+                "progress": 100,
+                "result": {
+                    "success": True,
+                    "posts": posts,
+                    "image_urls": image_urls,
+                    "carousel": use_carousel
+                },
+                "error": None
+            }
+
+    except Exception as e:
+        print(f"[SOCIAL] job {job_id} error: {e}")
+        JOBS[job_id] = {"status": "error", "progress": 0, "result": None, "error": str(e)}
+
+@router.post("/social/generate")
+async def start_generate(payload: GeneratePayload, background_tasks: BackgroundTasks):
+    if not OPENAI_API_KEY:
+        return {"success": False, "message": "Clé OpenAI manquante."}
+    
+    job_id = str(uuid.uuid4())
+    JOBS[job_id] = {"status": "starting", "progress": 0, "result": None, "error": None}
+    
+    background_tasks.add_task(run_generation, job_id, payload)
+    
+    return {"success": True, "job_id": job_id}
+
+@router.get("/social/generate/status")
+async def get_status(job_id: str):
+    job = JOBS.get(job_id)
+    if not job:
+        return {"success": False, "message": "Job introuvable"}
+    
+    return {
+        "success": True,
+        "status": job["status"],
+        "progress": job["progress"],
+        "result": job["result"],
+        "error": job["error"]
+    }
+
 @router.get("/social/advice")
 async def get_social_advice():
     if not supabase:
@@ -257,90 +379,6 @@ async def save_feedback(payload: FeedbackPayload):
     except Exception as e:
         print(f"[SOCIAL] feedback save: {e}")
         return {"success": False, "message": "Erreur enregistrement."}
-
-@router.post("/social/generate")
-async def generate_posts(payload: GeneratePayload):
-    if not OPENAI_API_KEY:
-        return {"success": False, "message": "Clé OpenAI manquante."}
-
-    user_id = payload.user_id
-    theme = (payload.theme or "").strip()
-    if theme == "Autre (précisez)":
-        theme = (payload.theme_other or "").strip()
-    platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
-    with_emojis = payload.with_emojis if payload.with_emojis is not None else True
-    use_carousel = payload.carousel or False
-
-    print(f"[SOCIAL] with_emojis={with_emojis} platforms={platforms} carousel={use_carousel}")
-
-    context = "activité non précisée"
-    length = "moyen"
-    logo_url = payload.logo_url
-    website = ""
-    if supabase:
-        try:
-            res = supabase.table("profiles").select("social_context, social_length, social_logo_url, website").eq("id", user_id).single().execute()
-            if res.data:
-                context = res.data.get("social_context") or context
-                length = res.data.get("social_length") or length
-                logo_url = logo_url or res.data.get("social_logo_url")
-                website = (res.data.get("website") or "").strip()
-        except Exception as e:
-            print(f"[SOCIAL] profile: {e}")
-
-    feedback_text = get_recent_feedback(user_id)
-
-    async with httpx.AsyncClient() as client:
-        # Image(s)
-        style = random.choice(STYLES)
-        base_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Format vertical 4:5."
-
-        if use_carousel:
-            prompts = [
-                base_prompt + " Vue principale du sujet, cadrage large.",
-                base_prompt + " Détail ou angle différent, focus sur une action ou un résultat.",
-                base_prompt + " Scène complémentaire, avant/après ou contexte d'utilisation."
-            ]
-            img_tasks = [generate_single_image(client, p, logo_url) for p in prompts]
-        else:
-            img_tasks = [generate_single_image(client, base_prompt, logo_url)]
-
-        # Textes en parallèle
-        text_tasks = [
-            generate_text_for_platform(client, p, context, theme, with_emojis, feedback_text, website)
-            for p in platforms
-        ]
-
-        # Tout en parallèle
-        all_results = await asyncio.gather(*img_tasks, *text_tasks, return_exceptions=True)
-
-        image_results = all_results[:len(img_tasks)]
-        text_results = all_results[len(img_tasks):]
-
-        image_urls = [r for r in image_results if isinstance(r, str)]
-
-        posts = []
-        for text in text_results:
-            if isinstance(text, dict):
-                text["image_url"] = image_urls[0] if image_urls else None
-                text["image_urls"] = image_urls
-                posts.append(text)
-            else:
-                posts.append({
-                    "platform": "unknown",
-                    "caption": "Erreur de génération.",
-                    "first_comment": "",
-                    "image_brief": "",
-                    "image_url": image_urls[0] if image_urls else None,
-                    "image_urls": image_urls
-                })
-
-    return {
-        "success": True,
-        "posts": posts,
-        "image_urls": image_urls,
-        "carousel": use_carousel
-    }
 
 @router.post("/social/logo")
 async def upload_logo(user_id: str = Form(...), file: UploadFile = File(...)):
