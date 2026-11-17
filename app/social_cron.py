@@ -94,7 +94,7 @@ async def send_scheduled_posts():
 
     try:
         res = supabase.table("profiles").select(
-            "id, email, social_context, social_length, social_logo_url, social_schedule_days, social_schedule_time"
+            "id, email, social_context, social_length, social_logo_url, social_schedule_days"
         ).execute()
 
         users = res.data or []
