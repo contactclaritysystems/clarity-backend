@@ -224,9 +224,21 @@ Réponds uniquement en JSON :
             "image_brief": ""
         }
 
+async def progress_ticker(job_id: str, start: int, end: int, duration: float):
+    """Fait monter le pourcentage de start à end sur duration secondes."""
+    steps = end - start
+    if steps <= 0 or duration <= 0:
+        return
+    delay = duration / steps
+    for i in range(steps):
+        if JOBS.get(job_id, {}).get("status") == "done":
+            return
+        JOBS[job_id]["progress"] = start + i + 1
+        await asyncio.sleep(delay)
+
 async def run_generation(job_id: str, payload: GeneratePayload):
-    """Génération en arrière-plan avec progression fluide."""
-    JOBS[job_id] = {"status": "starting", "progress": 5, "result": None, "error": None}
+    """Génération avec progression fluide 0→100."""
+    JOBS[job_id] = {"status": "starting", "progress": 0, "result": None, "error": None}
     
     try:
         user_id = payload.user_id
@@ -254,38 +266,43 @@ async def run_generation(job_id: str, payload: GeneratePayload):
         feedback_text = get_recent_feedback(user_id)
 
         async with httpx.AsyncClient() as client:
-            # Étape 1 : rédaction du texte
+            # Phase 1 : rédaction (0 → 35 %)
             JOBS[job_id]["status"] = "writing_text"
-            JOBS[job_id]["progress"] = 15
+            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 35, 8))
             
             text_tasks = [
                 generate_text_for_platform(client, p, context, theme, with_emojis, feedback_text, website)
                 for p in platforms
             ]
             text_results = await asyncio.gather(*text_tasks, return_exceptions=True)
+            ticker1.cancel()
 
-            # Étape 2 : 1er commentaire
+            # Phase 2 : 1er commentaire (35 → 45 %)
             JOBS[job_id]["status"] = "writing_comment"
-            JOBS[job_id]["progress"] = 40
+            JOBS[job_id]["progress"] = 35
+            ticker2 = asyncio.create_task(progress_ticker(job_id, 35, 45, 2))
+            await asyncio.sleep(1.5)
+            ticker2.cancel()
 
-            # Petite pause pour que le front affiche bien l'étape
-            await asyncio.sleep(0.8)
-
-            # Étape 3 : création de l'image
+            # Phase 3 : image (45 → 90 %)
             JOBS[job_id]["status"] = "generating_image"
-            JOBS[job_id]["progress"] = 55
+            JOBS[job_id]["progress"] = 45
+            ticker3 = asyncio.create_task(progress_ticker(job_id, 45, 90, 18))
             
             style = random.choice(STYLES)
             base_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Format vertical 4:5."
 
             image_url = await generate_single_image(client, base_prompt, logo_url)
+            ticker3.cancel()
 
-            # Étape 4 : finalisation
+            # Phase 4 : finalisation (90 → 100 %)
             JOBS[job_id]["status"] = "finalizing"
-            JOBS[job_id]["progress"] = 85
-            await asyncio.sleep(0.5)
+            JOBS[job_id]["progress"] = 90
+            ticker4 = asyncio.create_task(progress_ticker(job_id, 90, 100, 2))
+            await asyncio.sleep(1)
+            ticker4.cancel()
 
-            # Résultat final
+            # Résultat
             posts = []
             for text in text_results:
                 if isinstance(text, dict):
