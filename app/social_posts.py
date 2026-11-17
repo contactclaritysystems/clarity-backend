@@ -2,6 +2,7 @@ import os
 import json
 import random
 import base64
+import asyncio
 from io import BytesIO
 from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
@@ -53,6 +54,7 @@ class GeneratePayload(BaseModel):
     platforms: List[str] = ["instagram"]
     with_emojis: Optional[bool] = True
     logo_url: Optional[str] = None
+    carousel: Optional[bool] = False
 
 class FeedbackPayload(BaseModel):
     user_id: str
@@ -94,6 +96,152 @@ def get_recent_feedback(user_id: str) -> str:
         print(f"[SOCIAL] feedback read: {e}")
         return ""
 
+async def generate_single_image(client: httpx.AsyncClient, prompt: str, logo_url: str = None) -> str:
+    try:
+        img = await client.post(
+            "https://api.openai.com/v1/images/generations",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            json={"model": "gpt-image-2.5-sunburst", "prompt": prompt, "n": 1, "size": "1024x1024"},
+            timeout=60
+        )
+        if img.status_code != 200:
+            print(f"[SOCIAL] image error: {img.text[:200]}")
+            return None
+
+        data = img.json()
+        item = data["data"][0]
+        if "b64_json" in item:
+            img_bytes = base64.b64decode(item["b64_json"])
+        elif "url" in item:
+            r = await client.get(item["url"], timeout=30)
+            img_bytes = r.content
+        else:
+            return None
+
+        if logo_url:
+            try:
+                logo_resp = await client.get(logo_url, timeout=15)
+                if logo_resp.status_code == 200:
+                    base = Image.open(BytesIO(img_bytes)).convert("RGBA")
+                    final = overlay_logo(base, logo_resp.content)
+                    buf = BytesIO()
+                    final.convert("RGB").save(buf, format="JPEG", quality=85)
+                    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+            except Exception as e:
+                print(f"[SOCIAL] logo: {e}")
+
+        return "data:image/png;base64," + base64.b64encode(img_bytes).decode()
+    except Exception as e:
+        print(f"[SOCIAL] generate_single_image: {e}")
+        return None
+
+async def generate_text_for_platform(client: httpx.AsyncClient, platform: str, context: str, theme: str, with_emojis: bool, feedback_text: str, website: str) -> dict:
+    if platform == "instagram":
+        rules = """
+- Accroche ≤125 caractères, parle du problème du lecteur.
+- Texte : 80 à 150 mots.
+- 3 à 5 hashtags précis à la fin.
+- Jamais d'URL. Terminer par « Lien en bio ».
+- 1er commentaire : complément utile + question différente, SANS lien."""
+    elif platform == "facebook":
+        rules = """
+- Accroche ≤125 caractères.
+- Texte : 60 à 120 mots, ton conversation.
+- 0 à 2 hashtags.
+- Lien uniquement dans un 2e commentaire (pas dans le post ni le 1er).
+- 1er commentaire : complément + question, SANS lien."""
+    elif platform == "linkedin":
+        rules = """
+- 2 premières lignes d'accroche fortes.
+- Texte : 150 à 250 mots, aéré, professionnel.
+- 0 à 3 hashtags.
+- Pas de lien dans le post ni le 1er commentaire (envoi en privé de préférence).
+- 1er commentaire : complément + question, SANS lien."""
+    else:
+        rules = "- Texte naturel. Pas de lien dans le post."
+
+    emoji_rule = "0 à 3 emojis maximum, seulement utiles." if with_emojis else "Aucun emoji."
+    feedback_block = f"\n\nRetours précédents (à respecter) :\n{feedback_text}" if feedback_text else ""
+    website_info = f"\nSite : {website}" if website else ""
+
+    prompt = f"""Tu es l'assistant de rédaction de Clarity. Tu crées des publications image + texte pour artisans, TPE et indépendants français.
+
+Objectif : vraies interactions (commentaires, partages, enregistrements), pas des likes vides.
+
+Règles des algorithmes à appliquer :
+- Accroche dans les 125 premiers caractères.
+- Pas de lien externe dans le texte.
+- Pas d'appels à l'engagement forcés.
+- Texte naturel, pas générique.
+- Utilise de vrais sauts de ligne entre les paragraphes.
+
+{rules}
+- {emoji_rule}
+- 2-3 mots en gras Unicode dans la légende.
+- Ne jamais inventer de résultats ou de fonctionnalités.
+- Structure : problème → ce qui change → preuve.
+- Varie les angles, les personnages et les idées par rapport aux générations précédentes.
+{website_info}
+{feedback_block}
+
+Contexte activité : {context}
+Thème : {theme or "aucun"}
+
+Réponds uniquement en JSON :
+{{"caption": "texte avec vrais sauts de ligne \\n entre les paragraphes", "first_comment": "complément + question sans lien (toujours remplir)", "image_brief": "description précise"}}"""
+
+    try:
+        resp = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.4,
+                "max_tokens": 600
+            },
+            timeout=25
+        )
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw.strip())
+        return {
+            "platform": platform,
+            "caption": data.get("caption", "").replace("\\n", "\n"),
+            "first_comment": data.get("first_comment") or "Petit bonus : pense à répondre à tous les commentaires dans la première heure. Et toi, quelle tâche te prend le plus de temps le soir ?",
+            "image_brief": data.get("image_brief", "")
+        }
+    except Exception as e:
+        print(f"[SOCIAL] text {platform}: {e}")
+        return {
+            "platform": platform,
+            "caption": "Impossible de générer.",
+            "first_comment": "",
+            "image_brief": ""
+        }
+
+@router.get("/social/advice")
+async def get_social_advice():
+    if not supabase:
+        return {"success": False, "advice": "Conseils non disponibles.", "updated_at": None}
+
+    try:
+        res = supabase.table("social_advice").select("content, updated_at").eq("id", 1).single().execute()
+        if res.data:
+            return {
+                "success": True,
+                "advice": res.data.get("content") or "",
+                "updated_at": res.data.get("updated_at")
+            }
+    except Exception as e:
+        print(f"[SOCIAL] advice: {e}")
+
+    return {"success": False, "advice": "Conseils non disponibles.", "updated_at": None}
+
 @router.post("/social/feedback")
 async def save_feedback(payload: FeedbackPayload):
     if not supabase:
@@ -121,8 +269,9 @@ async def generate_posts(payload: GeneratePayload):
         theme = (payload.theme_other or "").strip()
     platforms = [p.lower() for p in (payload.platforms or ["instagram"])]
     with_emojis = payload.with_emojis if payload.with_emojis is not None else True
+    use_carousel = payload.carousel or False
 
-    print(f"[SOCIAL] with_emojis={with_emojis} platforms={platforms}")
+    print(f"[SOCIAL] with_emojis={with_emojis} platforms={platforms} carousel={use_carousel}")
 
     context = "activité non précisée"
     length = "moyen"
@@ -141,144 +290,57 @@ async def generate_posts(payload: GeneratePayload):
 
     feedback_text = get_recent_feedback(user_id)
 
-    shared_image_url = None
     async with httpx.AsyncClient() as client:
-        try:
-            style = random.choice(STYLES)
-            img_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique, regard fort. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Image cohérente avec l'activité décrite. Format vertical 4:5."
-            img = await client.post(
-                "https://api.openai.com/v1/images/generations",
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={"model": "gpt-image-2.5-sunburst", "prompt": img_prompt, "n": 1, "size": "1024x1024"},
-                timeout=90
-            )
-            print(f"[SOCIAL] image status: {img.status_code}")
-            if img.status_code == 200:
-                data = img.json()
-                item = data["data"][0]
-                if "b64_json" in item:
-                    img_bytes = base64.b64decode(item["b64_json"])
-                elif "url" in item:
-                    r = await client.get(item["url"])
-                    img_bytes = r.content
-                else:
-                    img_bytes = None
+        # Image(s)
+        style = random.choice(STYLES)
+        base_prompt = f"{style}. Activité : {context}. Thème : {theme or 'professionnel'}. Lumière contrastée, composition dynamique. Pas de texte dans l'image. Espace libre en haut à droite pour un logo. Format vertical 4:5."
 
-                if img_bytes and logo_url:
-                    try:
-                        logo_resp = await client.get(logo_url)
-                        if logo_resp.status_code == 200:
-                            base = Image.open(BytesIO(img_bytes)).convert("RGBA")
-                            final = overlay_logo(base, logo_resp.content)
-                            buf = BytesIO()
-                            final.convert("RGB").save(buf, format="JPEG", quality=90)
-                            shared_image_url = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
-                            print("[SOCIAL] logo applied")
-                        else:
-                            shared_image_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
-                    except Exception as e:
-                        print(f"[SOCIAL] logo overlay: {e}")
-                        shared_image_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
-                elif img_bytes:
-                    shared_image_url = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
-                print("[SOCIAL] image OK")
-            else:
-                print(f"[SOCIAL] image error: {img.text[:300]}")
-        except Exception as e:
-            print(f"[SOCIAL] image exception: {e}")
+        if use_carousel:
+            prompts = [
+                base_prompt + " Vue principale du sujet, cadrage large.",
+                base_prompt + " Détail ou angle différent, focus sur une action ou un résultat.",
+                base_prompt + " Scène complémentaire, avant/après ou contexte d'utilisation."
+            ]
+            img_tasks = [generate_single_image(client, p, logo_url) for p in prompts]
+        else:
+            img_tasks = [generate_single_image(client, base_prompt, logo_url)]
+
+        # Textes en parallèle
+        text_tasks = [
+            generate_text_for_platform(client, p, context, theme, with_emojis, feedback_text, website)
+            for p in platforms
+        ]
+
+        # Tout en parallèle
+        all_results = await asyncio.gather(*img_tasks, *text_tasks, return_exceptions=True)
+
+        image_results = all_results[:len(img_tasks)]
+        text_results = all_results[len(img_tasks):]
+
+        image_urls = [r for r in image_results if isinstance(r, str)]
 
         posts = []
-        for platform in platforms:
-            if platform == "instagram":
-                rules = """
-- Texte court et accrocheur : 3 à 5 lignes maximum.
-- 3 à 5 hashtags maximum, ciblés et pertinents, à la fin de la légende.
-- NE JAMAIS mettre d'URL dans le post ni dans le premier commentaire.
-- Terminer la légende par : « Lien en bio ».
-- Premier commentaire uniquement s'il apporte une vraie valeur (question utile). Sinon laisser vide."""
-            elif platform == "facebook":
-                rules = """
-- Texte naturel et engageant : 3 à 6 lignes.
-- 0 à 2 hashtags maximum.
-- Lien https://clarity-systems.fr/ à la fin de la publication.
-- Premier commentaire uniquement s'il apporte une vraie valeur. Sinon laisser vide."""
-            elif platform == "linkedin":
-                rules = """
-- Texte professionnel, concret et crédible : 6 à 10 lignes, aéré, orienté bénéfices réels.
-- 0 à 3 hashtags maximum.
-- Lien du site à la fin de la publication.
-- Premier commentaire uniquement s'il apporte une vraie valeur (précision ou question). Sinon laisser vide."""
+        for text in text_results:
+            if isinstance(text, dict):
+                text["image_url"] = image_urls[0] if image_urls else None
+                text["image_urls"] = image_urls
+                posts.append(text)
             else:
-                rules = "- Texte naturel. Hashtags limités. Lien si pertinent."
-
-            if with_emojis:
-                emoji_rule = "Utilise 1 à 3 smileys maximum dans la légende."
-            else:
-                emoji_rule = "INTERDICTION STRICTE : aucun smiley, aucun emoji."
-
-            feedback_block = ""
-            if feedback_text:
-                feedback_block = f"\n\nRetours précédents de cet utilisateur (à respecter) :\n{feedback_text}"
-
-            website_info = f"\nSite web de l'utilisateur : {website}" if website else "\nPas de site web renseigné."
-
-            prompt = f"""Tu es Clarity. Tu écris un post {platform} pour un indépendant / artisan.
-
-Contexte de l'activité : {context}
-Thème demandé : {theme or "aucun thème particulier"}
-Longueur : {length}
-{website_info}
-
-Règles obligatoires :
-- INTERDICTION ABSOLUE de caractères Markdown (**, ##, etc.). Texte brut uniquement.
-- Accroche différente et naturelle pour chaque réseau.
-- Éviter les formulations trop commerciales, génériques ou répétitives.
-- Ne jamais utiliser « tâches administratives ». Privilégier « organisation », « tâches répétitives », « gain de temps ».
-- Ne jamais inventer de fonctionnalités ou de résultats.
-- Varier les sujets et les accroches.
-- Écrire comme un humain premium, crédible, qui donne envie sans ressembler à une pub générée.
-{rules}
-- {emoji_rule}
-- Dans la légende : mets 2-3 mots importants en gras Unicode.
-{feedback_block}
-
-Réponds uniquement en JSON :
-{{"caption": "légende adaptée au réseau avec 2-3 mots en gras Unicode", "first_comment": "valeur réelle ou chaîne vide"}}"""
-
-            try:
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    json={
-                        "model": "gpt-4o-mini",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.5
-                    },
-                    timeout=40
-                )
-                resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
-                if raw.startswith("```"):
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
-                data = json.loads(raw.strip())
                 posts.append({
-                    "platform": platform,
-                    "caption": data.get("caption", ""),
-                    "first_comment": data.get("first_comment", ""),
-                    "image_url": shared_image_url
-                })
-            except Exception as e:
-                print(f"[SOCIAL] text {platform}: {e}")
-                posts.append({
-                    "platform": platform,
-                    "caption": "Impossible de générer.",
+                    "platform": "unknown",
+                    "caption": "Erreur de génération.",
                     "first_comment": "",
-                    "image_url": shared_image_url
+                    "image_brief": "",
+                    "image_url": image_urls[0] if image_urls else None,
+                    "image_urls": image_urls
                 })
 
-    return {"success": True, "posts": posts, "shared_image_url": shared_image_url}
+    return {
+        "success": True,
+        "posts": posts,
+        "image_urls": image_urls,
+        "carousel": use_carousel
+    }
 
 @router.post("/social/logo")
 async def upload_logo(user_id: str = Form(...), file: UploadFile = File(...)):
