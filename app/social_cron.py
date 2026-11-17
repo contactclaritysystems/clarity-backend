@@ -1,13 +1,13 @@
 import os
 import json
+import smtplib
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from fastapi import APIRouter
 from supabase import create_client
 import httpx
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 router = APIRouter()
 
@@ -18,57 +18,66 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABAS
 PARIS = ZoneInfo("Europe/Paris")
 
 DAY_MAP = {
-    0: "mon",
-    1: "tue",
-    2: "wed",
-    3: "thu",
-    4: "fri",
-    5: "sat",
-    6: "sun"
+    0: "lun",
+    1: "mar",
+    2: "mer",
+    3: "jeu",
+    4: "ven",
+    5: "sam",
+    6: "dim"
 }
 
-SMTP_HOST = os.getenv("NOTIFY_SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("NOTIFY_SMTP_PORT", "587"))
-SMTP_USER = os.getenv("NOTIFY_SMTP_USER")
-SMTP_PASS = os.getenv("NOTIFY_SMTP_PASS")
-SMTP_FROM = os.getenv("NOTIFY_FROM", SMTP_USER)
+def send_email(to_email: str, subject: str, body: str, html: bool = False) -> str:
+    host = os.getenv("NOTIFY_SMTP_HOST") or os.getenv("SMTP_HOST")
+    user = os.getenv("NOTIFY_SMTP_USER") or os.getenv("SMTP_USER")
+    password = os.getenv("NOTIFY_SMTP_PASS") or os.getenv("SMTP_PASS")
+    port = int(os.getenv("NOTIFY_SMTP_PORT") or os.getenv("SMTP_PORT") or "587")
+    from_addr = os.getenv("NOTIFY_FROM") or user
 
-def send_post_email(to_email: str, caption: str, image_url: str = None):
-    if not SMTP_USER or not SMTP_PASS:
-        print("[SOCIAL CRON] SMTP non configure")
-        return False
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Votre post Instagram est pret"
-    msg["From"] = SMTP_FROM
-    msg["To"] = to_email
-
-    html = f"""
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-      <h2 style="color:#1a1a1a;">Votre post est pret</h2>
-      <p style="white-space:pre-wrap;line-height:1.5;">{caption}</p>
-      {f'<img src="{image_url}" style="max-width:100%;border-radius:12px;margin-top:12px;" />' if image_url else ''}
-      <p style="color:#666;font-size:13px;margin-top:20px;">Copiez-collez directement dans Instagram.</p>
-    </div>
-    """
-    msg.attach(MIMEText(html, "html"))
+    if not all([host, user, password, from_addr]):
+        print("[SOCIAL CRON] SMTP incomplet")
+        return "smtp incomplete"
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_FROM, to_email, msg.as_string())
-        print(f"[SOCIAL CRON] Mail envoye a {to_email}")
-        return True
-    except Exception as e:
-        print(f"[SOCIAL CRON] Erreur mail: {e}")
-        return False
+        mime = MIMEMultipart()
+        mime["Subject"] = subject
+        mime["From"] = from_addr
+        mime["To"] = to_email
+        mime.attach(MIMEText(body, "html" if html else "plain", "utf-8"))
 
+        with smtplib.SMTP(host, port, timeout=20) as s:
+            s.starttls()
+            s.login(user, password)
+            s.sendmail(from_addr, [to_email], mime.as_string())
+        print(f"[SOCIAL CRON] mail ok → {to_email}")
+        return "ok"
+    except Exception as e:
+        print(f"[SOCIAL CRON] mail fail: {e}")
+        return f"smtp: {e}"
+
+def build_html(caption: str, image_url: str = None) -> str:
+    img_html = ""
+    if image_url:
+        img_html = f'<img src="{image_url}" style="max-width:100%;border-radius:12px;margin-bottom:16px;" />'
+
+    # On préserve les sauts de ligne du texte
+    caption_html = caption.replace("\n", "<br>")
+
+    return f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 20px; background: #fff; border-radius: 16px;">
+      <p style="color: #666; font-size: 14px; margin: 0 0 16px;">Votre publication Clarity</p>
+      {img_html}
+      <div style="background: #f8f8f8; padding: 16px; border-radius: 12px; font-size: 15px; line-height: 1.5; white-space: pre-wrap;">
+        {caption_html}
+      </div>
+      <p style="color: #999; font-size: 12px; margin-top: 20px;">Copiez-collez directement le texte ci-dessus.</p>
+    </div>
+    """
 
 @router.post("/cron/social-posts")
 async def send_scheduled_posts():
     if not supabase:
-        return {"success": False, "message": "Supabase non configure"}
+        return {"success": False, "message": "Supabase non configuré"}
 
     now = datetime.now(PARIS)
     current_day = DAY_MAP[now.weekday()]
@@ -78,25 +87,29 @@ async def send_scheduled_posts():
 
     try:
         res = supabase.table("profiles").select(
-            "id, email, social_context, social_length, social_logo_url, social_schedule_days"
+            "id, email, social_context, social_length, social_logo_url, social_schedule_days, social_schedule_time"
         ).execute()
 
         users = res.data or []
         sent = 0
 
         for user in users:
-            schedule = user.get("social_schedule_days") or {}
-            if isinstance(schedule, str):
+            days = user.get("social_schedule_days") or []
+            if isinstance(days, str):
                 try:
-                    schedule = json.loads(schedule)
+                    days = json.loads(days)
                 except:
-                    schedule = {}
+                    days = []
+            schedule_time = user.get("social_schedule_time") or "07:00"
 
-            if not isinstance(schedule, dict):
+            if current_day not in days:
+                continue
+            if schedule_time != current_time:
                 continue
 
-            scheduled_time = schedule.get(current_day)
-            if not scheduled_time or scheduled_time != current_time:
+            email = user.get("email")
+            if not email:
+                print(f"[SOCIAL CRON] pas d'email pour {user['id']}")
                 continue
 
             async with httpx.AsyncClient() as client:
@@ -122,9 +135,12 @@ async def send_scheduled_posts():
                 caption = post.get("caption", "")
                 image_url = post.get("image_url")
 
-                email = user.get("email")
-                if email and send_post_email(email, caption, image_url):
+                html = build_html(caption, image_url)
+                result = send_email(email, "Votre publication Clarity", html, html=True)
+
+                if result == "ok":
                     sent += 1
+                    print(f"[SOCIAL CRON] envoyé à {email}")
 
         return {"success": True, "sent": sent}
 
