@@ -5,6 +5,8 @@ import base64
 import asyncio
 import uuid
 import re
+import math
+import time
 from io import BytesIO
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks
@@ -29,6 +31,12 @@ if SUPABASE_URL and SUPABASE_KEY:
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 JOBS = {}
+
+IMAGE_MODEL = os.getenv("SOCIAL_IMAGE_MODEL", "gpt-image-2.5-sunburst")
+# "low" = le plus rapide, "medium" = bon compromis, "" = réglage par défaut du modèle
+IMAGE_QUALITY = os.getenv("SOCIAL_IMAGE_QUALITY", "medium")
+_IMAGE_OPTS = {"quality_ok": True}
+TEXT_MODEL = os.getenv("SOCIAL_TEXT_MODEL", "gpt-4o")
 
 SYSTEM_PROMPT = """Tu es l'assistant de rédaction de Clarity. Tu crées des publications « image + texte » pour Instagram, Facebook et LinkedIn, pour des artisans, des TPE et des indépendants français.
 Ton objectif : un maximum de vraies interactions (commentaires, partages en message privé, enregistrements, abonnements, demandes d'essai), pas des likes vides.
@@ -192,12 +200,26 @@ def get_recent_feedback(user_id: str) -> str:
 async def generate_image(client: httpx.AsyncClient, brief: str, logo_url: str = None) -> str:
     try:
         prompt = f"Photo réaliste, style smartphone, pas de banque d'images, pas de personne en costume au bureau. {brief}. Format vertical 4:5. Pas de personne en train de téléphoner, pas de fausse interface d'application ni de faux écran, pas de logo. Laisser le coin supérieur droit dégagé. Pas de texte dans l'image sauf si explicitement demandé entre guillemets."
+        body = {"model": IMAGE_MODEL, "prompt": prompt, "n": 1, "size": "1024x1024"}
+        if IMAGE_QUALITY and _IMAGE_OPTS["quality_ok"]:
+            body["quality"] = IMAGE_QUALITY
         img = await client.post(
             "https://api.openai.com/v1/images/generations",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            json={"model": "gpt-image-2.5-sunburst", "prompt": prompt, "n": 1, "size": "1024x1024"},
-            timeout=60
+            json=body,
+            timeout=90
         )
+        # Si le modèle n'accepte pas le paramètre "quality", on le retire pour de bon et on relance une fois
+        if img.status_code == 400 and "quality" in body and "quality" in img.text.lower():
+            print("[SOCIAL] quality non supporté par le modèle image, désactivé")
+            _IMAGE_OPTS["quality_ok"] = False
+            body.pop("quality", None)
+            img = await client.post(
+                "https://api.openai.com/v1/images/generations",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json=body,
+                timeout=90
+            )
         if img.status_code != 200:
             print(f"[SOCIAL] image error: {img.text[:200]}")
             return None
@@ -281,16 +303,131 @@ Génère uniquement ces versions, en JSON."""
         print(f"[SOCIAL] generate_posts: {e}")
         return {}
 
-async def progress_ticker(job_id: str, start: int, end: int, duration: float):
-    steps = end - start
-    if steps <= 0 or duration <= 0:
-        return
-    delay = duration / steps
-    for i in range(steps):
-        if JOBS.get(job_id, {}).get("status") == "done":
-            return
-        JOBS[job_id]["progress"] = start + i + 1
-        await asyncio.sleep(delay)
+def _parse_json(raw: str) -> dict:
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    data = json.loads(raw.strip())
+    if isinstance(data, dict):
+        data = {str(k).lower(): v for k, v in data.items()}
+    return data if isinstance(data, dict) else {}
+
+async def _chat_json(client: httpx.AsyncClient, user_msg: str, max_tokens: int, timeout: int) -> dict:
+    resp = await client.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+        json={
+            "model": TEXT_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg}
+            ],
+            "temperature": 0.75,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"}
+        },
+        timeout=timeout
+    )
+    resp.raise_for_status()
+    return _parse_json(resp.json()["choices"][0]["message"]["content"])
+
+def _base_request(context: str, theme: str, with_emojis: bool, feedback_text: str, website: str) -> str:
+    emoji_rule = "0 à 3 emojis maximum." if with_emojis else "Aucun emoji."
+    feedback_block = f"\n\nRetours précédents à respecter :\n{feedback_text}" if feedback_text else ""
+    website_info = f"\nSite : {website}" if website else ""
+    return f"""Contexte activité : {context}
+Thème : {theme or "aucun"}
+{emoji_rule}
+{website_info}
+{feedback_block}"""
+
+async def generate_plan(client: httpx.AsyncClient, base: str, platforms: List[str]) -> dict:
+    """Étape rapide : uniquement l'accroche et le brief image de chaque réseau (petite réponse = quelques secondes).
+    Permet de lancer les images tout de suite, en parallèle de la rédaction."""
+    labels = ", ".join(PLATFORM_LABELS.get(p, p) for p in platforms)
+    keys = ", ".join(f'"{p}"' for p in platforms)
+    user_msg = f"""{base}
+
+Réseaux demandés : {labels}
+ÉTAPE 1 SEULEMENT : pour chaque réseau, donne uniquement l'accroche (1re ligne du post, 125 caractères max, un type d'accroche différent par réseau) et le brief image (une image différente par réseau).
+Réponds en JSON avec les clés {keys}, chacune au format : {{"hook": "...", "brief": "..."}}"""
+    return await _chat_json(client, user_msg, max_tokens=700, timeout=30)
+
+async def generate_single_post(client: httpx.AsyncClient, base: str, platform: str, plan: dict) -> dict:
+    """Étape 2 : rédige le post complet d'UN réseau à partir de son accroche. Les réseaux sont rédigés en parallèle."""
+    label = PLATFORM_LABELS.get(platform, platform)
+    mine = plan.get(platform, {}) if isinstance(plan.get(platform), dict) else {}
+    others = [f"- {PLATFORM_LABELS.get(p, p)} : {v.get('hook', '')}" for p, v in plan.items()
+              if p != platform and isinstance(v, dict) and v.get("hook")]
+    others_block = ("\nAccroches des autres réseaux (ne reprends aucune de leurs phrases) :\n" + "\n".join(others)) if others else ""
+    user_msg = f"""{base}
+
+Réseau : {label} uniquement.
+Accroche imposée (1re ligne, à garder telle quelle) : {mine.get('hook', '')}
+Image prévue : {mine.get('brief', '')}{others_block}
+
+Rédige le post complet pour {label} et son 1er commentaire, en respectant toutes les règles.
+Réponds en JSON : {{"caption": "...", "first_comment": "..."}}"""
+    data = await _chat_json(client, user_msg, max_tokens=900, timeout=45)
+    # Le modèle répond parfois avec la clé du réseau autour : on accepte les deux formes
+    if platform in data and isinstance(data[platform], dict):
+        data = data[platform]
+    return {
+        "caption": clean_text(data.get("caption", "")),
+        "first_comment": clean_text(data.get("first_comment", "")),
+    }
+
+class Progress:
+    """Pourcentage basé sur le vrai avancement : chaque étape a un poids.
+    Une étape terminée compte entièrement ; une étape en cours avance doucement selon sa durée habituelle,
+    sans jamais dépasser 90 % de son poids. La barre ne fonce donc plus à 99 % pour y rester bloquée."""
+    def __init__(self, job_id: str):
+        self.job_id = job_id
+        self.steps = {}  # nom -> {"weight", "expected", "start", "done"}
+        self.last = 0
+
+    def add(self, name: str, weight: float, expected: float):
+        self.steps[name] = {"weight": weight, "expected": expected, "start": None, "done": False}
+
+    def start(self, name: str):
+        if name in self.steps and self.steps[name]["start"] is None:
+            self.steps[name]["start"] = time.monotonic()
+
+    def done(self, name: str):
+        if name in self.steps:
+            self.steps[name]["done"] = True
+        self.publish()
+
+    def value(self) -> int:
+        total = sum(s["weight"] for s in self.steps.values()) or 1
+        acc = 0.0
+        now = time.monotonic()
+        for s in self.steps.values():
+            if s["done"]:
+                acc += s["weight"]
+            elif s["start"] is not None:
+                elapsed = now - s["start"]
+                # Courbe douce : ~63 % du poids à la durée habituelle, puis ralentit, plafonnée à 90 %
+                frac = min(0.9, 1 - math.exp(-elapsed / max(s["expected"], 0.1)))
+                acc += s["weight"] * frac
+        return min(99, int(acc / total * 100))
+
+    def publish(self):
+        v = max(self.last, self.value())  # ne recule jamais
+        self.last = v
+        job = JOBS.get(self.job_id)
+        if job is not None and job.get("status") != "done":
+            job["progress"] = v
+
+    async def run(self):
+        try:
+            while True:
+                self.publish()
+                await asyncio.sleep(0.4)
+        except asyncio.CancelledError:
+            pass
 
 async def run_generation(job_id: str, payload):
     JOBS[job_id] = {"status": "starting", "progress": 0, "result": None, "error": None}
@@ -319,38 +456,90 @@ async def run_generation(job_id: str, payload):
         feedback_text = get_recent_feedback(user_id)
 
         async with httpx.AsyncClient() as client:
-            JOBS[job_id]["status"] = "writing_text"
-            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 25, 6))
-            
-            posts_data = await generate_posts(client, context, theme, with_emojis, feedback_text, website, platforms)
-            ticker1.cancel()
-
-            JOBS[job_id]["status"] = "generating_image"
-            JOBS[job_id]["progress"] = 25
-            ticker2 = asyncio.create_task(progress_ticker(job_id, 25, 99, 25))
-            
-            # Une image par réseau, générées en parallèle (même durée qu'une seule image)
+            base = _base_request(context, theme, with_emojis, feedback_text, website)
             fallback_brief = "Artisan au travail sur un vrai chantier, photo réaliste prise au smartphone, lumière naturelle"
-            briefs = []
-            for platform in platforms:
-                p_data = posts_data.get(platform, {}) if isinstance(posts_data, dict) else {}
-                briefs.append(p_data.get("brief") or fallback_brief)
 
-            image_urls = await asyncio.gather(
-                *[generate_image(client, b, logo_url) for b in briefs],
-                return_exceptions=True
-            )
-            image_urls = [u if isinstance(u, str) else None for u in image_urls]
-            ticker2.cancel()
+            # Poids des étapes (le pourcentage suit le vrai avancement)
+            progress = Progress(job_id)
+            progress.add("plan", weight=10, expected=4)
+            for p in platforms:
+                progress.add(f"text_{p}", weight=10, expected=8)
+                progress.add(f"image_{p}", weight=25, expected=20)
+            ticker = asyncio.create_task(progress.run())
+
+            try:
+                # Étape 1 (rapide) : accroches + briefs image
+                JOBS[job_id]["status"] = "writing_text"
+                progress.start("plan")
+                plan = {}
+                try:
+                    plan = await generate_plan(client, base, platforms)
+                except Exception as e:
+                    print(f"[SOCIAL] plan: {e}")
+                progress.done("plan")
+
+                if plan:
+                    # Étape 2 : TOUT en parallèle — images + rédaction de chaque réseau
+                    JOBS[job_id]["status"] = "generating_image"
+                    briefs = {p: ((plan.get(p) or {}).get("brief") if isinstance(plan.get(p), dict) else None) or fallback_brief
+                              for p in platforms}
+
+                    async def do_image(p):
+                        progress.start(f"image_{p}")
+                        try:
+                            return await generate_image(client, briefs[p], logo_url)
+                        finally:
+                            progress.done(f"image_{p}")
+
+                    async def do_text(p):
+                        progress.start(f"text_{p}")
+                        try:
+                            return await generate_single_post(client, base, p, plan)
+                        except Exception as e:
+                            print(f"[SOCIAL] text {p}: {e}")
+                            return {"caption": "", "first_comment": ""}
+                        finally:
+                            progress.done(f"text_{p}")
+
+                    results = await asyncio.gather(
+                        *[do_image(p) for p in platforms],
+                        *[do_text(p) for p in platforms],
+                        return_exceptions=True
+                    )
+                    n = len(platforms)
+                    image_urls = [r if isinstance(r, str) else None for r in results[:n]]
+                    texts = [r if isinstance(r, dict) else {"caption": "", "first_comment": ""} for r in results[n:]]
+                    posts_data = {p: {"brief": briefs[p], **texts[i]} for i, p in enumerate(platforms)}
+                else:
+                    # Repli : ancienne méthode (tout le texte d'un coup, puis les images en parallèle)
+                    for p in platforms:
+                        progress.start(f"text_{p}")
+                    posts_data = await generate_posts(client, context, theme, with_emojis, feedback_text, website, platforms)
+                    for p in platforms:
+                        progress.done(f"text_{p}")
+                    JOBS[job_id]["status"] = "generating_image"
+                    briefs = {p: (posts_data.get(p, {}) or {}).get("brief") or fallback_brief for p in platforms}
+
+                    async def do_image_fb(p):
+                        progress.start(f"image_{p}")
+                        try:
+                            return await generate_image(client, briefs[p], logo_url)
+                        finally:
+                            progress.done(f"image_{p}")
+
+                    res = await asyncio.gather(*[do_image_fb(p) for p in platforms], return_exceptions=True)
+                    image_urls = [r if isinstance(r, str) else None for r in res]
+            finally:
+                ticker.cancel()
 
             posts = []
-            for platform, brief, image_url in zip(platforms, briefs, image_urls):
-                p_data = posts_data.get(platform, {}) if isinstance(posts_data, dict) else {}
+            for platform, image_url in zip(platforms, image_urls):
+                p_data = posts_data.get(platform, {}) or {}
                 posts.append({
                     "platform": platform,
                     "caption": p_data.get("caption", ""),
                     "first_comment": p_data.get("first_comment", ""),
-                    "image_brief": brief,
+                    "image_brief": p_data.get("brief", fallback_brief),
                     "image_url": image_url,
                     "image_urls": [image_url] if image_url else []
                 })
