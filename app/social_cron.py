@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import smtplib
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -113,7 +114,7 @@ async def send_scheduled_posts():
                 continue
 
             async with httpx.AsyncClient() as client:
-                gen = await client.post(
+                start = await client.post(
                     "http://localhost:8000/social/generate",
                     json={
                         "user_id": user["id"],
@@ -122,16 +123,51 @@ async def send_scheduled_posts():
                         "with_emojis": True,
                         "logo_url": user.get("social_logo_url")
                     },
-                    timeout=120
+                    timeout=30
                 )
-                if gen.status_code != 200:
+                if start.status_code != 200:
                     print(f"[SOCIAL CRON] gen fail {user['id']}")
                     continue
-                data = gen.json()
-                if not data.get("success") or not data.get("posts"):
+                start_data = start.json()
+                job_id = start_data.get("job_id")
+                if not start_data.get("success") or not job_id:
+                    print(f"[SOCIAL CRON] pas de job_id pour {user['id']}")
                     continue
 
-                post = data["posts"][0]
+                # /social/generate renvoie désormais un job_id immédiatement
+                # (génération en tâche de fond) : il faut interroger
+                # /social/generate/status jusqu'à "done" avant d'avoir le
+                # post. Avant ce correctif, le code lisait "posts" directement
+                # sur la réponse du POST, qui ne l'a plus jamais contenu depuis
+                # le passage au système de job_id — c'est ce qui empêchait
+                # tout envoi de mail silencieusement.
+                post = None
+                for _ in range(40):  # ~40 x 2s = ~80s max d'attente
+                    await asyncio.sleep(2)
+                    status_resp = await client.get(
+                        "http://localhost:8000/social/generate/status",
+                        params={"job_id": job_id},
+                        timeout=20
+                    )
+                    if status_resp.status_code != 200:
+                        continue
+                    status_data = status_resp.json()
+                    if not status_data.get("success"):
+                        continue
+                    if status_data.get("status") == "done":
+                        result_data = status_data.get("result") or {}
+                        posts = result_data.get("posts") or []
+                        if posts:
+                            post = posts[0]
+                        break
+                    if status_data.get("status") == "error":
+                        print(f"[SOCIAL CRON] génération en erreur pour {user['id']}: {status_data.get('error')}")
+                        break
+
+                if not post:
+                    print(f"[SOCIAL CRON] pas de post généré pour {user['id']}")
+                    continue
+
                 caption = post.get("caption", "")
                 image_url = post.get("image_url")
 
