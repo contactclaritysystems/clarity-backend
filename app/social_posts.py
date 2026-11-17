@@ -15,6 +15,10 @@ from typing import Optional, List
 from supabase import create_client
 import httpx
 from PIL import Image
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
 
 router = APIRouter()
 
@@ -98,12 +102,12 @@ Choisis selon le thème :
 
 === BRIEF IMAGE (UNE seule image par réseau, pas de carrousel) ===
 Le brief est envoyé tel quel à un générateur d'images. Écris-le en français, en 2 à 4 phrases, comme une description de photo.
-- Un seul sujet, lisible en petit sur un téléphone. Photo réaliste prise au smartphone, lumière naturelle, vrai lieu de travail (chantier, atelier, camion, cuisine de client…).
-- L'image doit illustrer la SCÈNE de l'accroche (ex. : un artisan assis dans son camion le soir, téléphone en main, la lumière de l'écran sur le visage).
+- Un seul sujet, lisible en petit sur un téléphone. Photo réaliste prise au smartphone, lumière naturelle, vrai lieu de travail.
+- L'image doit illustrer la SCÈNE ou l'IDÉE de l'accroche de CE réseau précis, jamais une scène générique copiée d'un autre réseau.
+- LIEU OBLIGATOIREMENT DIFFÉRENT pour chacun des réseaux demandés : choisis un lieu différent pour chacun parmi chantier extérieur, atelier/garage, intérieur d'un véhicule professionnel, cuisine ou intérieur d'un client, bureau/accueil, cour ou dépôt de matériel. N'utilise jamais deux fois le même lieu, le même cadrage ni le même moment de la journée (matin/midi/soir/nuit) dans la même génération.
 - Si un texte doit apparaître sur l'image, écris-le entre guillemets dans le brief, 5 mots maximum, en très gros, fort contraste, en bas de l'image.
 - Interdit : personne au téléphone en train d'appeler, fausse interface d'application ou fausse capture d'écran, personne en costume au bureau, poignée de main, personne souriante qui pose face caméra, ordinateur portable au centre, logos.
 - Laisse le coin supérieur droit dégagé (un logo y sera ajouté).
-- Les 3 images doivent être différentes (scène, cadrage ou lieu).
 
 === EXEMPLES À IMITER (pour la qualité, ne pas copier les mots) ===
 
@@ -148,7 +152,7 @@ first_comment : Je me suis mis à dicter ces messages au lieu de les taper, Clar
 - L'accroche fait moins de 125 caractères, est une scène concrète et diffère des autres versions ?
 - Une seule action à la fin ? Zéro lien ?
 - Le 1er commentaire mentionne Clarity de façon discrète et VARIÉE (pas la même formulation qu'une autre version) et se termine bien par une question ?
-- Le brief décrit une seule image, sans téléphone en appel ni fausse interface ?
+- Le brief décrit une seule image, sans téléphone en appel ni fausse interface, et le LIEU est différent de celui des autres réseaux de cette génération ?
 Si une réponse est non, corrige avant de répondre.
 
 === FORMAT DE SORTIE ===
@@ -200,6 +204,52 @@ def get_recent_feedback(user_id: str) -> str:
     except Exception as e:
         print(f"[SOCIAL] feedback read: {e}")
         return ""
+
+async def send_post_email(to_email: str, subject: str, caption: str, image_url: str = None):
+    """Envoie le post par mail (texte + image si dispo)."""
+    if not to_email:
+        return False
+
+    smtp_host = os.getenv("NOTIFY_SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("NOTIFY_SMTP_PORT", "587"))
+    smtp_user = os.getenv("NOTIFY_SMTP_USER")
+    smtp_pass = os.getenv("NOTIFY_SMTP_PASS")
+    from_email = os.getenv("NOTIFY_FROM", smtp_user)
+
+    if not smtp_user or not smtp_pass:
+        print("[SOCIAL] SMTP non configuré")
+        return False
+
+    try:
+        msg = MIMEMultipart("related")
+        msg["Subject"] = subject
+        msg["From"] = from_email
+        msg["To"] = to_email
+
+        html = f"""<html><body style="font-family:sans-serif;max-width:600px;margin:auto;">
+<p style="white-space:pre-wrap;">{caption}</p>
+"""
+        if image_url and image_url.startswith("data:image"):
+            img_data = image_url.split(",")[1]
+            img_bytes = base64.b64decode(img_data)
+            img_part = MIMEImage(img_bytes, _subtype="jpeg")
+            img_part.add_header("Content-ID", "<postimage>")
+            msg.attach(img_part)
+            html += '<img src="cid:postimage" style="max-width:100%;border-radius:8px;margin-top:12px;">'
+
+        html += "</body></html>"
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, to_email, msg.as_string())
+
+        print(f"[SOCIAL] mail envoyé à {to_email}")
+        return True
+    except Exception as e:
+        print(f"[SOCIAL] mail error: {e}")
+        return False
 
 async def generate_image(client: httpx.AsyncClient, brief: str, logo_url: str = None) -> str:
     try:
@@ -578,6 +628,12 @@ class FeedbackPayload(BaseModel):
     liked: bool
     comment: Optional[str] = ""
 
+class SendEmailPayload(BaseModel):
+    to_email: str
+    subject: Optional[str] = "Publication Clarity"
+    caption: str
+    image_url: Optional[str] = None
+
 @router.post("/social/generate")
 async def start_generate(payload: GeneratePayload, background_tasks: BackgroundTasks):
     if not OPENAI_API_KEY:
@@ -645,3 +701,13 @@ async def upload_logo(user_id: str = Form(...), file: UploadFile = File(...)):
     except Exception as e:
         print(f"[SOCIAL] logo: {e}")
         return {"success": False, "message": "Erreur logo."}
+
+@router.post("/social/send-email")
+async def send_email(payload: SendEmailPayload):
+    ok = await send_post_email(
+        payload.to_email,
+        payload.subject or "Publication Clarity",
+        payload.caption,
+        payload.image_url
+    )
+    return {"success": ok}
