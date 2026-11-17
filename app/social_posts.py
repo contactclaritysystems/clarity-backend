@@ -196,7 +196,6 @@ Génère les 3 versions (Instagram, Facebook, LinkedIn)."""
                 raw = raw[4:]
         data = json.loads(raw.strip())
         
-        # Nettoyage markdown
         for platform in data:
             if isinstance(data[platform], dict):
                 data[platform]["caption"] = clean_text(data[platform].get("caption", ""))
@@ -245,34 +244,39 @@ async def run_generation(job_id: str, payload):
         feedback_text = get_recent_feedback(user_id)
 
         async with httpx.AsyncClient() as client:
-            # Phase 1 : rédaction
             JOBS[job_id]["status"] = "writing_text"
-            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 30, 8))
+            ticker1 = asyncio.create_task(progress_ticker(job_id, 0, 25, 6))
             
             posts_data = await generate_posts(client, context, theme, with_emojis, feedback_text, website)
             ticker1.cancel()
 
-            # Phase 2 : images
             JOBS[job_id]["status"] = "generating_image"
-            JOBS[job_id]["progress"] = 30
-            ticker2 = asyncio.create_task(progress_ticker(job_id, 30, 95, 20))
+            JOBS[job_id]["progress"] = 25
+            ticker2 = asyncio.create_task(progress_ticker(job_id, 25, 99, 25))
             
+            first_brief = ""
+            for p in platforms:
+                p_data = posts_data.get(p, {})
+                if p_data.get("brief"):
+                    first_brief = p_data.get("brief")
+                    break
+            if not first_brief:
+                first_brief = "artisan au travail, style réaliste, photo smartphone"
+            
+            image_url = await generate_image(client, first_brief, logo_url)
+            ticker2.cancel()
+
             posts = []
             for platform in platforms:
                 p_data = posts_data.get(platform, {})
-                brief = p_data.get("brief", "artisan au travail, style réaliste")
-                image_url = await generate_image(client, brief, logo_url)
-                
                 posts.append({
                     "platform": platform,
                     "caption": p_data.get("caption", ""),
                     "first_comment": p_data.get("first_comment", ""),
-                    "image_brief": brief,
+                    "image_brief": p_data.get("brief", first_brief),
                     "image_url": image_url,
                     "image_urls": [image_url] if image_url else []
                 })
-            
-            ticker2.cancel()
 
             JOBS[job_id] = {
                 "status": "done",
@@ -280,7 +284,7 @@ async def run_generation(job_id: str, payload):
                 "result": {
                     "success": True,
                     "posts": posts,
-                    "image_urls": [p["image_url"] for p in posts if p.get("image_url")],
+                    "image_urls": [image_url] if image_url else [],
                     "carousel": False
                 },
                 "error": None
