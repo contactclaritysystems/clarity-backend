@@ -165,6 +165,83 @@ Réponds uniquement avec un objet JSON, sans texte autour. Une clé par réseau 
   }
 }"""
 
+# === Filtre de validation post-generation =====================================
+# Le prompt interdit explicitement ces mots/tournures (section 3 du
+# SYSTEM_PROMPT), mais en usage reel le modele (meme gpt-6) laisse parfois
+# passer certains d'entre eux malgre la consigne renforcee. Cette verification
+# mecanique (regex, donc fiable a 100% contrairement a une relecture par un
+# autre appel au modele) sert de filet de securite : si une violation est
+# detectee, on redemande une generation CIBLEE du texte (voir
+# generate_single_post / retry_hint) au lieu de publier tel quel.
+BANNED_PATTERNS = [
+    (r"\bimagine[zr]?\b", "Imaginez/imagine"),
+    (r"\bsaviez[\s-]vous\b", "Saviez-vous"),
+    (r"\bvous\s+[êe]tes\s+d[ée]bord[ée]?s?\b", "Vous êtes débordé"),
+    (r"\btu\s+perds?\s+du\s+temps\b", "Tu perds du temps"),
+    (r"\bvous\s+passez\s+trop\s+de\s+temps\b", "Vous passez trop de temps"),
+    (r"\bce\s+qui\s+compte\s+vraiment\b", "ce qui compte vraiment"),
+    (r"\bl['’]essentiel\b", "l'essentiel"),
+    (r"\bgagn\w*\s+(un\s+temps\s+pr[ée]cieux|de?u?\s*temps)\b", "gagner du temps / un temps précieux"),
+    (r"\boptimis\w*\s+(votre|ton|mon|son)?\s*temps\b", "optimiser votre temps"),
+    (r"\bdis(?:ez|ons)?\s+adieu\b", "dites adieu"),
+    (r"\bfinis?e?s?\s+les\b", "fini(e)s les"),
+    (r"\bne\s+laisse(?:z|s)?\s+plus\b", "ne laissez plus"),
+    (r"\blib[ée]r(?:ez|e|es)[\s-]*(?:vous|toi)\b", "libérez-vous"),
+    (r"\bet\s+bien\s+plus\b", "et bien plus"),
+    (r"\bn['’]est\s+pas\s+juste\s+une\s+(?:application|app)\b", "n'est pas juste une application"),
+    (r"\bau\s+quotidien\b", "au quotidien"),
+    (r"\ben\s+toute\s+s[ée]r[ée]nit[ée]\b", "en toute sérénité"),
+    (r"\br[ée]volutionn\w*\b", "révolutionner"),
+    (r"\bboost\w*\b", "booster"),
+    (r"\bd[ée]couvr\w*\s+comment\b", "découvrez comment"),
+    (r"\bbonjour\s+[àa]\s+tous\b", "Bonjour à tous"),
+]
+_BANNED_COMPILED = [(re.compile(pat, re.IGNORECASE), label) for pat, label in BANNED_PATTERNS]
+
+_FORBIDDEN_COMMENT_OPENERS = [
+    re.compile(r"^\s*saviez[\s-]vous", re.IGNORECASE),
+    re.compile(r"^\s*petit\s+secret", re.IGNORECASE),
+    re.compile(r"^\s*(une\s+)?(petite\s+)?astuce\s*:", re.IGNORECASE),
+]
+
+def find_banned_phrases(text: str) -> list:
+    if not text:
+        return []
+    found = []
+    for pattern, label in _BANNED_COMPILED:
+        if pattern.search(text):
+            found.append(label)
+    return found
+
+def validate_platform_post(caption: str, first_comment: str, other_comment_openers: list) -> list:
+    """Verifie un post genere pour UN reseau. other_comment_openers : debuts
+    (~25 premiers caracteres) des 1ers commentaires deja generes pour les
+    AUTRES reseaux de cette meme generation, pour detecter les doublons de
+    formulation. Retourne la liste des violations trouvees (vide = post ok)."""
+    violations = []
+
+    for label in find_banned_phrases(caption):
+        violations.append(f"mot interdit dans le post : « {label} »")
+    for label in find_banned_phrases(first_comment):
+        violations.append(f"mot interdit dans le 1er commentaire : « {label} »")
+
+    if first_comment:
+        stripped = first_comment.strip()
+        if not stripped.endswith("?"):
+            violations.append("le 1er commentaire ne se termine pas par une question")
+        for pattern in _FORBIDDEN_COMMENT_OPENERS:
+            if pattern.search(stripped):
+                violations.append("le 1er commentaire commence par une ouverture interdite (ex. Astuce :, Saviez-vous, Petit secret)")
+                break
+        opener = stripped[:25].lower()
+        for other in other_comment_openers:
+            if other and opener == other[:25].lower():
+                violations.append("le 1er commentaire reprend la même ouverture qu'un autre réseau de cette génération")
+                break
+
+    return violations
+# === Fin filtre de validation ==================================================
+
 
 def clean_text(text: str) -> str:
     if not text:
@@ -413,18 +490,26 @@ Réseaux demandés : {labels}
 Réponds en JSON avec les clés {keys}, chacune au format : {{"hook": "...", "brief": "..."}}"""
     return await _chat_json(client, user_msg, max_tokens=700, timeout=30)
 
-async def generate_single_post(client: httpx.AsyncClient, base: str, platform: str, plan: dict) -> dict:
-    """Étape 2 : rédige le post complet d'UN réseau à partir de son accroche. Les réseaux sont rédigés en parallèle."""
+async def generate_single_post(client: httpx.AsyncClient, base: str, platform: str, plan: dict, retry_hint: str = None) -> dict:
+    """Étape 2 : rédige le post complet d'UN réseau à partir de son accroche. Les réseaux sont rédigés en parallèle.
+    retry_hint : liste de violations (voir validate_platform_post) a corriger, passee uniquement lors d'une
+    regeneration ciblee apres echec du filtre de validation (voir run_generation)."""
     label = PLATFORM_LABELS.get(platform, platform)
     mine = plan.get(platform, {}) if isinstance(plan.get(platform), dict) else {}
     others = [f"- {PLATFORM_LABELS.get(p, p)} : {v.get('hook', '')}" for p, v in plan.items()
               if p != platform and isinstance(v, dict) and v.get("hook")]
     others_block = ("\nAccroches des autres réseaux (ne reprends aucune de leurs phrases) :\n" + "\n".join(others)) if others else ""
+    retry_block = ""
+    if retry_hint:
+        retry_block = f"""
+
+ATTENTION, ta précédente réponse pour ce réseau a été refusée pour la/les raison(s) suivante(s) : {retry_hint}
+Réécris entièrement le post et le 1er commentaire en corrigeant précisément ce(s) point(s), sans réintroduire ni ce mot/cette tournure interdits, ni le même défaut."""
     user_msg = f"""{base}
 
 Réseau : {label} uniquement.
 Accroche imposée (1re ligne, à garder telle quelle) : {mine.get('hook', '')}
-Image prévue : {mine.get('brief', '')}{others_block}
+Image prévue : {mine.get('brief', '')}{others_block}{retry_block}
 
 Rédige le post complet pour {label} et son 1er commentaire, en respectant toutes les règles.
 Réponds en JSON : {{"caption": "...", "first_comment": "..."}}"""
@@ -568,6 +653,51 @@ async def run_generation(job_id: str, payload):
                     image_urls = [r if isinstance(r, str) else None for r in results[:n]]
                     texts = [r if isinstance(r, dict) else {"caption": "", "first_comment": ""} for r in results[n:]]
                     posts_data = {p: {"brief": briefs[p], **texts[i]} for i, p in enumerate(platforms)}
+
+                    # === Filtre de validation + regeneration ciblee ===========
+                    # Verification mecanique (voir validate_platform_post) du
+                    # texte de CHAQUE reseau : mots interdits, 1er commentaire
+                    # qui doit finir par "?", ouverture interdite, doublon de
+                    # formulation entre reseaux. Seuls les reseaux en defaut
+                    # sont regeneres (jusqu'a 2 essais supplementaires chacun),
+                    # jamais les images ni les reseaux deja corrects — donc
+                    # aucun ralentissement quand le texte est deja propre.
+                    MAX_TEXT_RETRIES = 2
+                    for p in platforms:
+                        other_openers = [
+                            (posts_data[op].get("first_comment") or "")[:25]
+                            for op in platforms if op != p
+                        ]
+                        violations = validate_platform_post(
+                            posts_data[p].get("caption", ""),
+                            posts_data[p].get("first_comment", ""),
+                            other_openers
+                        )
+                        attempt = 0
+                        while violations and attempt < MAX_TEXT_RETRIES:
+                            attempt += 1
+                            print(f"[SOCIAL] {p} violation(s) (essai {attempt}): {violations}")
+                            try:
+                                retried = await generate_single_post(
+                                    client, base, p, plan,
+                                    retry_hint="; ".join(violations)
+                                )
+                            except Exception as e:
+                                print(f"[SOCIAL] retry text {p}: {e}")
+                                break
+                            posts_data[p] = {"brief": briefs[p], **retried}
+                            other_openers = [
+                                (posts_data[op].get("first_comment") or "")[:25]
+                                for op in platforms if op != p
+                            ]
+                            violations = validate_platform_post(
+                                posts_data[p].get("caption", ""),
+                                posts_data[p].get("first_comment", ""),
+                                other_openers
+                            )
+                        if violations:
+                            print(f"[SOCIAL] {p} publie malgre {len(violations)} violation(s) apres {MAX_TEXT_RETRIES} essais: {violations}")
+                    # === Fin filtre de validation ==============================
                 else:
                     # Repli : ancienne méthode (tout le texte d'un coup, puis les images en parallèle)
                     for p in platforms:
