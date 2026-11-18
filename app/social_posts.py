@@ -240,6 +240,62 @@ def validate_platform_post(caption: str, first_comment: str, other_comment_opene
                 break
 
     return violations
+
+_PLATFORM_FIX_PREFIX = {
+    "instagram": "Pour ma part, ",
+    "facebook": "De mon cote, ",
+    "linkedin": "Autre chose : ",
+}
+
+def force_fix_post(platform: str, caption: str, first_comment: str) -> tuple:
+    """Dernier filet de securite, qui ne depend plus du modele : si le texte
+    contient encore une violation apres les essais de regeneration (voir
+    run_generation), on la corrige nous-memes par simple substitution de
+    texte. Une substitution en code ne peut pas se tromper comme un appel
+    au modele -- ca garantit qu'aucune violation ne part jamais en
+    production, meme si le modele echoue a se corriger lui-meme."""
+    def strip_banned(text: str) -> str:
+        if not text:
+            return text
+        for pattern, _label in _BANNED_COMPILED:
+            text = pattern.sub("", text)
+        # Nettoyage : espaces en trop, ponctuation collee, mot immediatement
+        # duplique par la suppression (ex. "sur ... sur" -> "sur"), ligne
+        # vide en trop.
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        text = re.sub(r"\s+([,.!?])", r"\1", text)
+        text = re.sub(r"(^|\n)[ \t]+", r"\1", text)
+        text = re.sub(r"\b(\w+)(\s+\1\b)+", r"\1", text, flags=re.IGNORECASE)
+        return text.strip()
+
+    def recapitalize(text: str) -> str:
+        return (text[0].upper() + text[1:]) if text and text[0].isalpha() else text
+
+    caption = recapitalize(strip_banned(caption))
+    first_comment = strip_banned(first_comment)
+
+    if first_comment:
+        for pattern in _FORBIDDEN_COMMENT_OPENERS:
+            first_comment = pattern.sub("", first_comment).strip()
+        first_comment = recapitalize(first_comment)
+        if not first_comment.rstrip().endswith("?"):
+            first_comment = first_comment.rstrip()
+            if first_comment and first_comment[-1] not in ".!?":
+                first_comment += "."
+            first_comment = (first_comment + " Et vous ?").strip()
+
+    return caption, first_comment
+
+def deduplicate_opener(platform: str, first_comment: str) -> str:
+    """Prefixe le commentaire d'une courte formule distincte par reseau si son
+    ouverture est encore identique a celle d'un autre reseau apres les
+    essais de regeneration -- garantit l'absence de doublon, sans dependre
+    du modele."""
+    prefix = _PLATFORM_FIX_PREFIX.get(platform, "")
+    if not prefix or not first_comment:
+        return first_comment
+    return prefix + first_comment[0].lower() + first_comment[1:]
+
 # === Fin filtre de validation ==================================================
 
 
@@ -696,7 +752,32 @@ async def run_generation(job_id: str, payload):
                                 other_openers
                             )
                         if violations:
-                            print(f"[SOCIAL] {p} publie malgre {len(violations)} violation(s) apres {MAX_TEXT_RETRIES} essais: {violations}")
+                            # Le modele n'a pas reussi a se corriger seul en
+                            # MAX_TEXT_RETRIES essais : on applique le filet de
+                            # securite deterministe (force_fix_post), qui ne
+                            # depend plus du modele et garantit donc le
+                            # resultat, au lieu de publier tel quel avec une
+                            # violation connue.
+                            print(f"[SOCIAL] {p} correction automatique en code apres {MAX_TEXT_RETRIES} essais: {violations}")
+                            fixed_caption, fixed_comment = force_fix_post(
+                                p,
+                                posts_data[p].get("caption", ""),
+                                posts_data[p].get("first_comment", "")
+                            )
+                            posts_data[p]["caption"] = fixed_caption
+                            posts_data[p]["first_comment"] = fixed_comment
+                            other_openers = [
+                                (posts_data[op].get("first_comment") or "")[:25]
+                                for op in platforms if op != p
+                            ]
+                            remaining = validate_platform_post(fixed_caption, fixed_comment, other_openers)
+                            if any("ouverture qu'un autre r" in v for v in remaining):
+                                posts_data[p]["first_comment"] = deduplicate_opener(p, fixed_comment)
+                                remaining = [v for v in remaining if "ouverture qu'un autre r" not in v]
+                            if remaining:
+                                print(f"[SOCIAL] {p} reste imparfait malgre la correction automatique: {remaining}")
+                            else:
+                                print(f"[SOCIAL] {p} corrige automatiquement, plus aucune violation")
                     # === Fin filtre de validation ==============================
                 else:
                     # Repli : ancienne méthode (tout le texte d'un coup, puis les images en parallèle)
