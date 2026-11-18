@@ -1,10 +1,12 @@
 import os
 import json
 import asyncio
+import base64
 import smtplib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from fastapi import APIRouter
 from supabase import create_client
@@ -41,7 +43,11 @@ DAY_MAP = {
     6: "sun"
 }
 
-def send_email(to_email: str, subject: str, body: str, html: bool = False) -> str:
+def send_email(to_email: str, subject: str, body: str, html: bool = False, inline_images: list = None) -> str:
+    """inline_images : liste de (cid, data_uri) a joindre en Content-ID
+    (data_uri au format "data:image/jpeg;base64,xxxx"), referencees dans le
+    HTML par <img src="cid:LE_CID">. Plus fiable que <img src="data:..."">
+    brut, mal supporte par certains clients mail (ex. Outlook)."""
     host = os.getenv("NOTIFY_SMTP_HOST") or os.getenv("SMTP_HOST")
     user = os.getenv("NOTIFY_SMTP_USER") or os.getenv("SMTP_USER")
     password = os.getenv("NOTIFY_SMTP_PASS") or os.getenv("SMTP_PASS")
@@ -53,11 +59,25 @@ def send_email(to_email: str, subject: str, body: str, html: bool = False) -> st
         return "smtp incomplete"
 
     try:
-        mime = MIMEMultipart()
+        mime = MIMEMultipart("related")
         mime["Subject"] = subject
         mime["From"] = from_addr
         mime["To"] = to_email
         mime.attach(MIMEText(body, "html" if html else "plain", "utf-8"))
+
+        for cid, data_uri in (inline_images or []):
+            try:
+                header, b64data = data_uri.split(",", 1)
+                subtype = "jpeg"
+                if "image/png" in header:
+                    subtype = "png"
+                img_bytes = base64.b64decode(b64data)
+                img_part = MIMEImage(img_bytes, _subtype=subtype)
+                img_part.add_header("Content-ID", f"<{cid}>")
+                img_part.add_header("Content-Disposition", "inline", filename=f"{cid}.{subtype}")
+                mime.attach(img_part)
+            except Exception as e:
+                print(f"[SOCIAL CRON] image inline {cid} ignoree: {e}")
 
         with smtplib.SMTP(host, port, timeout=20) as s:
             s.starttls()
@@ -69,22 +89,53 @@ def send_email(to_email: str, subject: str, body: str, html: bool = False) -> st
         print(f"[SOCIAL CRON] mail fail: {e}")
         return f"smtp: {e}"
 
-def build_html(caption: str, image_url: str = None) -> str:
-    img_html = ""
-    if image_url:
-        img_html = f'<img src="{image_url}" style="max-width:100%;border-radius:12px;margin-bottom:16px;" />'
+PLATFORM_LABELS_CRON = {
+    "instagram": "Instagram",
+    "facebook": "Facebook",
+    "linkedin": "LinkedIn"
+}
 
-    # On préserve les sauts de ligne du texte
-    caption_html = caption.replace("\n", "<br>")
+def build_section_html(post: dict, img_cid: str = None) -> str:
+    caption = (post.get("caption") or "").replace("\n", "<br>")
+    first_comment = (post.get("first_comment") or "").replace("\n", "<br>")
+    label = PLATFORM_LABELS_CRON.get(post.get("platform"), post.get("platform") or "")
+
+    img_html = ""
+    if img_cid:
+        img_html = f'<img src="cid:{img_cid}" style="max-width:100%;border-radius:12px;margin:12px 0;" />'
+
+    comment_html = ""
+    if first_comment:
+        comment_html = f"""
+      <p style="color:#888; font-size:12px; margin:12px 0 4px; text-transform:uppercase; letter-spacing:0.04em;">1er commentaire</p>
+      <div style="background:#f0f0f0; padding:12px 16px; border-radius:10px; font-size:14px; line-height:1.5; white-space:pre-wrap;">
+        {first_comment}
+      </div>"""
 
     return f"""
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 20px; background: #fff; border-radius: 16px;">
-      <p style="color: #666; font-size: 14px; margin: 0 0 16px;">Votre publication Clarity</p>
-      {img_html}
-      <div style="background: #f8f8f8; padding: 16px; border-radius: 12px; font-size: 15px; line-height: 1.5; white-space: pre-wrap;">
-        {caption_html}
+    <div style="margin-bottom:28px; padding-bottom:28px; border-bottom:1px solid #eee;">
+      <p style="color:#6b4ee6; font-size:13px; font-weight:600; margin:0 0 10px; text-transform:uppercase; letter-spacing:0.04em;">{label}</p>
+      <div style="background:#f8f8f8; padding:16px; border-radius:12px; font-size:15px; line-height:1.5; white-space:pre-wrap;">
+        {caption}
       </div>
-      <p style="color: #999; font-size: 12px; margin-top: 20px;">Copiez-collez directement le texte ci-dessus.</p>
+      {img_html}
+      {comment_html}
+    </div>
+    """
+
+def build_html(posts: list, images_by_platform: dict) -> str:
+    """posts : liste d'objets {platform, caption, first_comment, image_url}.
+    images_by_platform : { platform: cid } pour les images deja jointes en
+    inline (voir send_email/inline_images)."""
+    sections = "".join(
+        build_section_html(post, images_by_platform.get(post.get("platform")))
+        for post in posts
+    )
+    return f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; background: #fff; border-radius: 16px;">
+      <p style="color: #666; font-size: 14px; margin: 0 0 20px;">Vos publications Clarity du jour</p>
+      {sections}
+      <p style="color: #999; font-size: 12px; margin-top: 8px;">Copiez-collez directement le texte de chaque réseau ci-dessus.</p>
     </div>
     """
 
@@ -161,7 +212,10 @@ async def send_scheduled_posts():
                     json={
                         "user_id": user["id"],
                         "theme": "Conseil / astuce utile",
-                        "platforms": ["instagram"],
+                        # Les 3 reseaux geres par Clarity (voir SOCIAL_PLATFORMS
+                        # cote frontend) : avant, seul Instagram etait demande,
+                        # donc le mail ne contenait jamais Facebook/LinkedIn.
+                        "platforms": ["instagram", "facebook", "linkedin"],
                         "with_emojis": True,
                         "logo_url": user.get("social_logo_url")
                     },
@@ -183,8 +237,11 @@ async def send_scheduled_posts():
                 # sur la réponse du POST, qui ne l'a plus jamais contenu depuis
                 # le passage au système de job_id — c'est ce qui empêchait
                 # tout envoi de mail silencieusement.
-                post = None
-                for _ in range(40):  # ~40 x 2s = ~80s max d'attente
+                posts = []
+                # 3 reseaux a generer (texte + image chacun) au lieu d'un
+                # seul avant : on elargit la fenetre d'attente du polling
+                # par securite (60 x 2s = 120s max, contre 80s avant).
+                for _ in range(60):
                     await asyncio.sleep(2)
                     status_resp = await client.get(
                         f"http://localhost:{internal_port}/social/generate/status",
@@ -199,22 +256,37 @@ async def send_scheduled_posts():
                     if status_data.get("status") == "done":
                         result_data = status_data.get("result") or {}
                         posts = result_data.get("posts") or []
-                        if posts:
-                            post = posts[0]
                         break
                     if status_data.get("status") == "error":
                         print(f"[SOCIAL CRON] génération en erreur pour {user['id']}: {status_data.get('error')}")
                         break
 
-                if not post:
+                if not posts:
                     print(f"[SOCIAL CRON] pas de post généré pour {user['id']}")
                     continue
 
-                caption = post.get("caption", "")
-                image_url = post.get("image_url")
+                # Chaque image est une data:image/...;base64,... (jamais une
+                # URL classique, voir generate_image dans social_posts.py) :
+                # on la joint en piece jointe inline (Content-ID) plutot que
+                # de la mettre brute dans <img src="data:...">, plus fiable
+                # selon les clients mail.
+                inline_images = []
+                images_by_platform = {}
+                for idx, post in enumerate(posts):
+                    image_url = post.get("image_url")
+                    if image_url and image_url.startswith("data:image"):
+                        cid = f"socialimg{idx}"
+                        inline_images.append((cid, image_url))
+                        images_by_platform[post.get("platform")] = cid
 
-                html = build_html(caption, image_url)
-                result = send_email(email, "Votre publication Clarity", html, html=True)
+                html = build_html(posts, images_by_platform)
+                result = send_email(
+                    email,
+                    "Vos publications Clarity du jour",
+                    html,
+                    html=True,
+                    inline_images=inline_images
+                )
 
                 if result == "ok":
                     sent += 1
