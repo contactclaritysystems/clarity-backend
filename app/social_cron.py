@@ -10,6 +10,13 @@ from fastapi import APIRouter
 from supabase import create_client
 import httpx
 
+# Reutilise la logique de notifications.py (rappels/RDV, qui fonctionnent
+# deja) : si profiles.email est vide, elle va chercher l'email directement
+# dans Supabase Auth (auth.users) via sb.auth.admin.get_user_by_id. C'est
+# exactement ce qui manquait ici : social_cron.py se contentait de lire
+# profiles.email et abandonnait silencieusement quand elle etait vide.
+from app.notifications import lookup_email
+
 router = APIRouter()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -99,6 +106,7 @@ async def send_scheduled_posts():
 
         users = res.data or []
         sent = 0
+        email_cache: dict = {}
 
         for user in users:
             # social_schedule_days est un objet { "lun": "07:00", "mar": "20:10", ... } :
@@ -136,7 +144,7 @@ async def send_scheduled_posts():
             if diff > 2:
                 continue
 
-            email = user.get("email")
+            email = user.get("email") or lookup_email(supabase, str(user["id"]), email_cache)
             if not email:
                 print(f"[SOCIAL CRON] pas d'email pour {user['id']}")
                 continue
