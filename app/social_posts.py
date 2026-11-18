@@ -326,7 +326,11 @@ Génère uniquement ces versions, en JSON."""
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
             json={
-                "model": "gpt-4o",
+                # Codee en dur sur "gpt-4o" auparavant, contrairement a
+                # _chat_json() qui utilise deja TEXT_MODEL : la variable
+                # d'env SOCIAL_TEXT_MODEL ne changeait donc pas vraiment le
+                # modele utilise pour la generation principale des posts.
+                "model": TEXT_MODEL,
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg}
