@@ -18,6 +18,7 @@ import httpx
 # exactement ce qui manquait ici : social_cron.py se contentait de lire
 # profiles.email et abandonnait silencieusement quand elle etait vide.
 from app.notifications import lookup_email
+from app.social_posts import save_today_posts
 
 router = APIRouter()
 
@@ -72,10 +73,22 @@ def send_email(to_email: str, subject: str, body: str, html: bool = False, inlin
                 if "image/png" in header:
                     subtype = "png"
                 img_bytes = base64.b64decode(b64data)
+
+                # Copie 1 : affichee dans le mail (Content-ID, inline).
                 img_part = MIMEImage(img_bytes, _subtype=subtype)
                 img_part.add_header("Content-ID", f"<{cid}>")
                 img_part.add_header("Content-Disposition", "inline", filename=f"{cid}.{subtype}")
                 mime.attach(img_part)
+
+                # Copie 2 : vraie piece jointe telechargeable. Une image
+                # uniquement "inline" ne propose pas toujours "Enregistrer
+                # l'image" selon le client mail -- une piece jointe classique
+                # garantit ce bouton natif partout, sans dependre du client.
+                attachment_part = MIMEImage(img_bytes, _subtype=subtype)
+                attachment_part.add_header(
+                    "Content-Disposition", "attachment", filename=f"{cid}.{subtype}"
+                )
+                mime.attach(attachment_part)
             except Exception as e:
                 print(f"[SOCIAL CRON] image inline {cid} ignoree: {e}")
 
@@ -120,6 +133,9 @@ def build_section_html(post: dict, img_cid: str = None) -> str:
       </div>
       {img_html}
       {comment_html}
+      <p style="margin:12px 0 0;">
+        <a href="https://clarity-systems.fr" style="color:#6b4ee6; font-size:13px; text-decoration:none;">Ouvrir dans l'app pour copier le texte &rarr;</a>
+      </p>
     </div>
     """
 
@@ -264,6 +280,12 @@ async def send_scheduled_posts():
                 if not posts:
                     print(f"[SOCIAL CRON] pas de post généré pour {user['id']}")
                     continue
+
+                # Sauvegarde en base AVANT l'envoi du mail : meme si l'email
+                # echoue plus bas, les publications du jour restent
+                # disponibles dans l'app (source de verite desormais,
+                # l'email n'est qu'une notification pratique).
+                save_today_posts(str(user["id"]), posts)
 
                 # Chaque image est une data:image/...;base64,... (jamais une
                 # URL classique, voir generate_image dans social_posts.py) :

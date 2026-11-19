@@ -247,6 +247,49 @@ _PLATFORM_FIX_PREFIX = {
     "linkedin": "Autre chose : ",
 }
 
+_DANGLING_ENDERS = {
+    "sur", "pour", "avec", "de", "d", "a", "\u00e0", "dans", "chez", "vers",
+    "par", "sans", "sous", "entre", "et", "ou", "mais", "donc", "car", "que",
+    "qui", "quand", "comme", "ne", "un", "une", "le", "la", "les", "des",
+    "du", "ce", "cette", "ces", "dont", "afin", "selon", "malgre", "malgr\u00e9",
+    "depuis", "pendant", "durant", "envers", "parmi", "apres", "apr\u00e8s",
+    "avant", "jusqu", "grace", "gr\u00e2ce", "notre", "votre", "mon", "ma", "mes",
+}
+
+
+def _drop_dangling_sentences(text: str) -> str:
+    """Si la suppression d'une formule interdite laisse une phrase qui se
+    termine sur un mot qui ne peut pas tenir seul (preposition, article,
+    conjonction -- ex: "je peux enfin me concentrer sur." apres le retrait
+    de "ce qui compte vraiment"), on retire cette phrase ENTIEREMENT plutot
+    que de laisser un morceau de phrase incoherent partir en production.
+    Garanti par construction : soit la phrase est complete, soit elle
+    disparait, jamais de version a moitie coupee."""
+    if not text:
+        return text
+    lines = text.split("\n")
+    fixed_lines = []
+    for line in lines:
+        if not line.strip():
+            fixed_lines.append(line)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+", line.strip())
+        kept = []
+        for s in sentences:
+            core = s.strip()
+            if not core:
+                continue
+            m = re.search(r"([A-Za-z\u00c0-\u00ff]+)[\s.!?]*$", core)
+            last_word = m.group(1).lower() if m else ""
+            if last_word in _DANGLING_ENDERS:
+                continue
+            kept.append(core)
+        fixed_lines.append(" ".join(kept))
+    result = "\n".join(fixed_lines)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
+
+
 def force_fix_post(platform: str, caption: str, first_comment: str) -> tuple:
     """Dernier filet de securite, qui ne depend plus du modele : si le texte
     contient encore une violation apres les essais de regeneration (voir
@@ -266,6 +309,10 @@ def force_fix_post(platform: str, caption: str, first_comment: str) -> tuple:
         text = re.sub(r"\s+([,.!?])", r"\1", text)
         text = re.sub(r"(^|\n)[ \t]+", r"\1", text)
         text = re.sub(r"\b(\w+)(\s+\1\b)+", r"\1", text, flags=re.IGNORECASE)
+        # Phrase cassee par le retrait d'une formule interdite (ex: "...sur."
+        # apres suppression de "ce qui compte vraiment") -> on retire la
+        # phrase entiere, jamais un fragment incoherent.
+        text = _drop_dangling_sentences(text)
         return text.strip()
 
     def recapitalize(text: str) -> str:
@@ -813,6 +860,8 @@ async def run_generation(job_id: str, payload):
                     "image_urls": [image_url] if image_url else []
                 })
 
+            save_today_posts(user_id, posts)
+
             JOBS[job_id] = {
                 "status": "done",
                 "progress": 100,
@@ -828,6 +877,25 @@ async def run_generation(job_id: str, payload):
     except Exception as e:
         print(f"[SOCIAL] job {job_id} error: {e}")
         JOBS[job_id] = {"status": "error", "progress": 0, "result": None, "error": str(e)}
+
+def save_today_posts(user_id: str, posts: list) -> None:
+    """Enregistre la derniere generation du jour (manuelle ou automatique
+    via le cron) pour cet utilisateur, afin que l'app affiche toujours les
+    publications du jour en ouvrant l'ecran Publications -- plus besoin de
+    tout recevoir uniquement par mail. Un seul enregistrement par
+    utilisateur (upsert sur user_id) : reste valable jusqu'a la prochaine
+    generation (lendemain ou "Regenerer"), jamais d'historique a gerer ici."""
+    if not supabase or not user_id or not posts:
+        return
+    try:
+        supabase.table("social_posts_today").upsert({
+            "user_id": user_id,
+            "posts": posts,
+            "generated_at": datetime.utcnow().isoformat(),
+        }, on_conflict="user_id").execute()
+    except Exception as e:
+        print(f"[SOCIAL] save_today_posts: {e}")
+
 
 class GeneratePayload(BaseModel):
     user_id: str
@@ -848,6 +916,32 @@ class SendEmailPayload(BaseModel):
     subject: Optional[str] = "Publication Clarity"
     caption: str
     image_url: Optional[str] = None
+
+@router.get("/social/today")
+async def get_today_posts(user_id: str):
+    """Derniere generation du jour pour cet utilisateur (manuelle ou via le
+    cron automatique) -- permet a l'app d'afficher les publications sans
+    attendre une nouvelle generation a l'ouverture de l'ecran."""
+    if not supabase or not user_id:
+        return {"success": True, "posts": []}
+    try:
+        res = (
+            supabase.table("social_posts_today")
+            .select("posts, generated_at")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if res and res.data and res.data.get("posts"):
+            return {
+                "success": True,
+                "posts": res.data["posts"],
+                "generated_at": res.data.get("generated_at"),
+            }
+    except Exception as e:
+        print(f"[SOCIAL] get_today_posts: {e}")
+    return {"success": True, "posts": []}
+
 
 @router.post("/social/generate")
 async def start_generate(payload: GeneratePayload, background_tasks: BackgroundTasks):
