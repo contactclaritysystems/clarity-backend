@@ -295,6 +295,7 @@ Réponds UNIQUEMENT en JSON valide.
 Champs :
 - contact_name: prénom/nom du client ou null
 - title: motif court du RDV ou null (ex: match de foot, devis)
+- location: lieu du rendez-vous dicté par l'utilisateur ou null (ex: "à la Timone", "chez le client", "au cabinet")
 - description: détails ou ""
 - mentioned_weekday: UNIQUEMENT lundi/mardi/mercredi/jeudi/vendredi/samedi/dimanche si l'utilisateur a dit CE mot. Sinon null.
   INTERDIT: demain, après-demain, aujourd'hui, prochain (ce ne sont PAS des weekdays)
@@ -322,7 +323,7 @@ async def extract_slots_llm(instruction: str) -> dict:
             if raw.startswith("json"):
                 raw = raw[4:].strip()
         data = json.loads(raw)
-        for k in ("contact_name", "title", "mentioned_weekday"):
+        for k in ("contact_name", "title", "mentioned_weekday", "location"):
             if data.get(k) in ("null", "None", ""):
                 data[k] = None
         return data
@@ -481,6 +482,11 @@ async def run_planning_agent(payload: dict) -> dict:
     user_id = payload.get("user_id")
     user_name = (payload.get("user_name") or "").strip() or "Anthony"
     history = payload.get("conversation_history") or ""
+    # "pour moi-même" dit explicitement qu'il n'y a pas de contact à trouver :
+    # ne pas bloquer le RDV en redemandant un contact/motif dans ce cas.
+    is_self_appointment = bool(re.search(
+        r"\bpour\s+moi[\s-]?m[êe]me\b", (instruction + " " + (history or "")).lower()
+    ))
 
     # Slots déjà fournis explicitement (suivi)
     slots: Dict[str, Any] = {
@@ -551,12 +557,76 @@ async def run_planning_agent(payload: dict) -> dict:
                 slots["title"] = llm["title"]
             if llm.get("description"):
                 slots["description"] = llm["description"]
+            if llm.get("location"):
+                loc = str(llm["location"]).strip()
+                existing_desc = (slots.get("description") or "").strip()
+                if loc and loc.lower() not in existing_desc.lower():
+                    slots["description"] = (
+                        (existing_desc + " · " if existing_desc else "") + f"Lieu : {loc}"
+                    ).strip()
             nb = parse_notify_before(instruction) or parse_notify_before(history)
             if nb is not None and slots.get("notify_minutes_before") in (None, "", "null"):
                 slots["notify_minutes_before"] = nb
 
-            # Jour + quantième incohérents ("vendredi 24" alors que le 24 est un jeudi) :
-            # on ne bloque plus. parse_french_date a déjà choisi (jour de semaine prioritaire).
+            # Jour + quantième incohérents ("vendredi 24" alors que le 24 ne tombe
+            # pas un vendredi dans les 3 prochains mois) : parse_french_date privilegie
+            # le jour de semaine (il ignore alors silencieusement le "24") -- un RDV
+            # est trop important pour laisser passer ça sans le signaler. On recalcule
+            # la date que donnerait le quantième seul et on compare : si elle ne tombe
+            # pas sur le jour annoncé, on redemande explicitement plutôt que de deviner.
+            mentioned_weekday = llm.get("mentioned_weekday")
+            mentioned_day_number = llm.get("mentioned_day_number")
+            if mentioned_weekday and mentioned_day_number and slots.get("appointment_date"):
+                _days_map_check = {
+                    "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
+                    "vendredi": 4, "samedi": 5, "dimanche": 6,
+                }
+                said_wd = _days_map_check.get(str(mentioned_weekday).lower())
+                try:
+                    said_day = int(mentioned_day_number)
+                except Exception:
+                    said_day = None
+                if said_wd is not None and said_day and 1 <= said_day <= 31:
+                    now_base = _now_paris().replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+                    date_for_daynum = None
+                    for month_shift in (0, 1, 2):
+                        y, m = now_base.year, now_base.month + month_shift
+                        while m > 12:
+                            m -= 12
+                            y += 1
+                        try:
+                            d = datetime(y, m, said_day)
+                        except ValueError:
+                            continue
+                        if d.date() < now_base.date():
+                            continue
+                        date_for_daynum = d
+                        break
+                    if date_for_daynum and date_for_daynum.weekday() != said_wd:
+                        chosen_date = slots["appointment_date"]
+                        daynum_date_str = date_for_daynum.strftime("%Y-%m-%d")
+                        actual_wd_name = weekday_name_fr(daynum_date_str)
+                        if chosen_date != daynum_date_str:
+                            return {
+                                "success": False,
+                                "reason": "date_ambiguous",
+                                "message": (
+                                    f"Attention : le {format_ddmmyyyy(daynum_date_str)} tombe un "
+                                    f"{actual_wd_name}, pas un {mentioned_weekday}. Quelle date voulez-vous ?"
+                                ),
+                                "suggestions": [
+                                    {
+                                        "label": f"{str(mentioned_weekday).capitalize()} {format_ddmmyyyy(chosen_date)}",
+                                        "date": chosen_date,
+                                    },
+                                    {
+                                        "label": f"{actual_wd_name.capitalize()} {format_ddmmyyyy(daynum_date_str)}",
+                                        "date": daynum_date_str,
+                                    },
+                                ],
+                                "partial": {**slots, "appointment_date": None},
+                                "request_id": request_id,
+                            }
 
         # --- Slot filling : ne demander que le trou ---
         partial_tag = json.dumps({
@@ -615,7 +685,7 @@ async def run_planning_agent(payload: dict) -> dict:
         if title.lower() in ("rendez-vous", "rdv", "rendez vous"):
             title = ""
         contact = (slots.get("contact_name") or "").strip()
-        if not contact and not title:
+        if not contact and not title and not is_self_appointment:
             return {
                 "success": False,
                 "reason": "missing_contact",
