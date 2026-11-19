@@ -81,6 +81,26 @@ def bump_weekday_if_past(date_str: str, time_str: Optional[str], instruction: st
     return date_str
 
 
+def resolve_weekday_and_day(base: datetime, weekday: int, day_num: int) -> Optional[str]:
+    """Si 'vendredi 24' : on prend le 24 s'il TOMBE ce jour-là (ce mois ou le suivant).
+    Sinon on garde le prochain vendredi — on ne bloque jamais."""
+    for month_shift in (0, 1, 2):
+        y = base.year
+        m = base.month + month_shift
+        while m > 12:
+            m -= 12
+            y += 1
+        try:
+            d = datetime(y, m, day_num)
+        except ValueError:
+            continue
+        if d.date() < base.date():
+            continue
+        if d.weekday() == weekday:
+            return d.strftime("%Y-%m-%d")
+    return None
+
+
 def next_weekday(base: datetime, target_weekday: int, prochain: bool = False) -> datetime:
     current = base.weekday()
     days_ahead = target_weekday - current
@@ -149,9 +169,28 @@ def parse_french_date(instruction: str, base: Optional[datetime] = None) -> Opti
         "vendredi": 4, "samedi": 5, "dimanche": 6,
     }
     prochain = "prochain" in text or "prochaine" in text
+    day_num = None
+    mday = re.search(
+        r"\b(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\b",
+        text,
+    )
+    if not mday:
+        mday = re.search(
+            r"\b(\d{1,2})\s+(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b",
+            text,
+        )
+    if mday:
+        n = int(mday.group(1))
+        if 1 <= n <= 31:
+            day_num = n
     for name, wd in days_map.items():
-        if re.search(rf"\b{name}\b", text):
-            return next_weekday(base, wd, prochain=prochain).strftime("%Y-%m-%d")
+        if not re.search(rf"\b{name}\b", text):
+            continue
+        if day_num:
+            resolved = resolve_weekday_and_day(base, wd, day_num)
+            if resolved:
+                return resolved
+        return next_weekday(base, wd, prochain=prochain).strftime("%Y-%m-%d")
 
     m = re.search(r"dans\s+(\d+)\s+jours?", text)
     if m:
@@ -516,33 +555,8 @@ async def run_planning_agent(payload: dict) -> dict:
             if nb is not None and slots.get("notify_minutes_before") in (None, "", "null"):
                 slots["notify_minutes_before"] = nb
 
-            # Cohérence jour / date
-            inconsistency = check_date_consistency(
-                slots.get("appointment_date"),
-                llm.get("mentioned_weekday")
-            )
-            if inconsistency and slots.get("appointment_date"):
-                said = inconsistency["said_weekday"]
-                actual = inconsistency["actual_weekday"]
-                # Calculer la date du jour dit (prochain)
-                days_map = {
-                    "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
-                    "vendredi": 4, "samedi": 5, "dimanche": 6,
-                }
-                alt = None
-                if said in days_map:
-                    alt = next_weekday(datetime.now(), days_map[said], prochain=True).strftime("%Y-%m-%d")
-                return {
-                    "success": False,
-                    "reason": "date_ambiguous",
-                    "message": f"Attention : le {format_ddmmyyyy(slots['appointment_date'])} tombe un {actual}, pas un {said}.",
-                    "suggestions": [
-                        {"label": f"{actual.capitalize()} {slots['appointment_date']}", "date": slots["appointment_date"]},
-                        *([{"label": f"{said.capitalize()} {alt}", "date": alt}] if alt else []),
-                    ],
-                    "partial": {**slots, "appointment_date": None},
-                    "request_id": request_id,
-                }
+            # Jour + quantième incohérents ("vendredi 24" alors que le 24 est un jeudi) :
+            # on ne bloque plus. parse_french_date a déjà choisi (jour de semaine prioritaire).
 
         # --- Slot filling : ne demander que le trou ---
         partial_tag = json.dumps({
