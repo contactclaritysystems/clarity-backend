@@ -484,26 +484,6 @@ def update_last_appointment_notify(user_id: str, minutes: int) -> bool:
         return None
 
 
-def check_date_consistency(date_str: str, mentioned_weekday: Optional[str]) -> Optional[dict]:
-    """Uniquement si un VRAI jour de semaine a été dit et ne correspond pas."""
-    if not date_str or not mentioned_weekday:
-        return None
-    said = mentioned_weekday.lower().strip()
-    # Ne jamais traiter demain / aujourd'hui / etc. comme weekday
-    if said in ("demain", "après-demain", "apres-demain", "aujourd'hui", "aujourdhui",
-                "prochain", "prochaine", "matin", "soir", "midi"):
-        return None
-    valid = {"lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"}
-    if said not in valid:
-        return None
-    actual = weekday_name_fr(date_str)
-    if not actual:
-        return None
-    if said != actual:
-        return {"actual_weekday": actual, "said_weekday": said}
-    return None
-
-
 async def run_planning_agent(payload: dict) -> dict:
     instruction = (payload.get("instruction") or "").strip()
     request_id = payload.get("request_id")
