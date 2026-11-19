@@ -301,6 +301,8 @@ Champs :
   INTERDIT: demain, après-demain, aujourd'hui, prochain (ce ne sont PAS des weekdays)
 - mentioned_day_number: numéro du jour dans le mois ou null (ex: 25)
 
+- Auto-correction en cours de dictée : si l'utilisateur se reprend ("non plutôt", "en fait", "pardon je voulais dire", "euh non") sur une date, heure, nom ou détail, utilise UNIQUEMENT la valeur CORRIGÉE (la dernière dite), jamais l'ancienne. Ex: "vers 9h, non plutôt vers 10h" → retiens 10h, ne mentionne jamais 9h.
+
 Ne calcule PAS la date finale. Juste ce qui est dit.
 """
 
@@ -418,6 +420,32 @@ def create_appointment(user_id: str, data: dict) -> Optional[dict]:
             except Exception as e3:
                 print(f"[Planning] insert retry2: {e3}")
                 return None
+
+
+def find_conflicting_appointment(user_id: str, date_str: str, time_str: str) -> Optional[dict]:
+    """Cherche un RDV deja enregistre a la MEME date+heure pour cet utilisateur
+    (hors annules) -- un RDV est trop important pour en ecraser un autre sans
+    prevenir l'utilisateur d'abord."""
+    sb = get_supabase()
+    if not sb or not user_id or not date_str or not time_str:
+        return None
+    try:
+        time_norm = str(time_str)[:5]
+        q = (
+            sb.table("appointments")
+            .select("id, contact_name, title, appointment_date, appointment_time")
+            .eq("user_id", user_id)
+            .eq("appointment_date", date_str)
+            .eq("appointment_time", time_norm)
+            .neq("status", "cancelled")
+            .limit(1)
+            .execute()
+        )
+        rows = q.data or []
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"[Planning] find_conflicting_appointment: {e}")
+        return None
 
 
 def update_last_appointment_notify(user_id: str, minutes: int) -> bool:
@@ -722,6 +750,35 @@ async def run_planning_agent(payload: dict) -> dict:
                 "message": "Utilisateur non identifié.",
                 "request_id": request_id,
             }
+
+        # Conflit d'agenda : un RDV existe deja a la MEME date+heure pour cet
+        # utilisateur -- on previent avant d'ecraser silencieusement (cf.
+        # Anthony : "Un rdv est important il ne dois pas y avoir d'erreur de
+        # la part de Clarity"). confirm_conflict (envoye par le frontend sur
+        # "Enregistrer quand meme") permet de passer outre ce garde-fou une
+        # fois l'utilisateur prevenu.
+        if (
+            not payload.get("confirm_conflict")
+            and slots.get("appointment_date")
+            and slots.get("appointment_time")
+        ):
+            conflict = find_conflicting_appointment(
+                user_id, slots["appointment_date"], slots["appointment_time"]
+            )
+            if conflict:
+                conflict_who = conflict.get("contact_name") or conflict.get("title") or "un rendez-vous"
+                when_txt = format_fr_date(slots["appointment_date"], slots["appointment_time"])
+                return {
+                    "success": False,
+                    "reason": "schedule_conflict",
+                    "message": (
+                        f"Attention : vous avez déjà {conflict_who} le {when_txt}. "
+                        f"Voulez-vous quand même enregistrer ce rendez-vous, ou changer le jour/l'heure ?"
+                    ),
+                    "conflict": conflict,
+                    "partial": slots,
+                    "request_id": request_id,
+                }
 
         nb_final = slots.get("notify_minutes_before")
         if nb_final is None:
