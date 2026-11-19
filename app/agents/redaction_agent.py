@@ -291,11 +291,13 @@ Rédaction :
 - INTERDIT d'ajouter un motif : attentes, parties prenantes, coordination,
   bon suivi, clarifier, s'assurer, permettant de, afin de, il est crucial.
 - « récap demain » → « Envoyer le récapitulatif demain. » Rien d'autre.
+- Auto-correction en cours de dictée : si l'utilisateur se reprend ("non plutôt", "en fait", "pardon je voulais dire", "euh non") sur une date, heure, nom ou détail, utilise UNIQUEMENT la valeur CORRIGÉE (la dernière dite), jamais l'ancienne. Ex: "vers 9h, non plutôt vers 10h" → retiens 10h, ne mentionne jamais 9h.
 """
 
 WRITE_SYSTEM = """Tu es le rédacteur de Clarity Systems (SaaS français premium).
 RÈGLE D'OR : zéro invention de CONTENU.
 Texte final direct, sans "Voici le message&".
+- Auto-correction en cours de dictée : si l'utilisateur se reprend ("non plutôt", "en fait", "pardon je voulais dire", "euh non") sur une date, heure, nom ou détail, utilise UNIQUEMENT la valeur CORRIGÉE (la dernière dite), jamais l'ancienne. Ex: "vers 9h, non plutôt vers 10h" → retiens 10h, ne mentionne jamais 9h.
 """
 
 

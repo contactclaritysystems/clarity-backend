@@ -60,6 +60,7 @@ Règles has_enough_content :
 - false UNIQUEMENT si la demande est vide de contenu : "envoie un mail à Antoine" sans autre info
 - "écrit un message pour Anthony, dit lui rdv demain 8h" → to_names: ["Anthony"], has_enough_content: true, content_summary: "RDV demain à 8h"
 - Détecte les copies : "mets Paul en copie" → cc_names
+- Auto-correction en cours de dictée : si l'utilisateur se reprend ("non plutôt", "en fait", "pardon je voulais dire", "euh non") sur une date, heure, nom ou détail, utilise UNIQUEMENT la valeur CORRIGÉE (la dernière dite), jamais l'ancienne. Ex: "vers 9h, non plutôt vers 10h" → retiens 10h, ne mentionne jamais 9h.
 
 {
   "to_names": ["prénom"],
@@ -189,6 +190,7 @@ Règles STRICTES de mise en page :
 - Jamais "l'utilisateur"
 - Respecte le ton demandé
 - N'invente JAMAIS de dates, montants, lieux ou détails non fournis dans le contenu
+- Auto-correction en cours de dictée : si l'utilisateur se reprend ("non plutôt", "en fait", "pardon je voulais dire", "euh non") sur une date, heure, nom ou détail, utilise UNIQUEMENT la valeur CORRIGÉE (la dernière dite), jamais l'ancienne. Ex: "vers 9h, non plutôt vers 10h" → retiens 10h, ne mentionne jamais 9h.
 - Si les dates de congés ne sont pas précisées, demande-les implicitement ou reste vague ("sur la période souhaitée") SANS inventer du 10 au 14 avril
 - RDV : si l'utilisateur DONNE un créneau ("rdv demain 7h", "dit-lui mardi 8h")
   → propose ou fixe CE créneau, sans le transformer.

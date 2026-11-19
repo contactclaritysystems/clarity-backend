@@ -133,6 +133,8 @@ Réponds UNIQUEMENT en JSON valide.
   "message_context": "détails éventuels ou null"
 }
 
+- Auto-correction en cours de dictée : si l'utilisateur se reprend ("non plutôt", "en fait", "pardon je voulais dire", "euh non") sur une date, heure, nom ou détail, utilise UNIQUEMENT la valeur CORRIGÉE (la dernière dite), jamais l'ancienne. Ex: "vers 9h, non plutôt vers 10h" → retiens 10h, ne mentionne jamais 9h.
+
 reason = ce qu'il ne faut pas oublier, formulé clairement, sans 'rappelle-moi'.
 """
 
